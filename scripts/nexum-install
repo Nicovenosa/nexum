@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Install an InstalledLayoutV1 artifact into a caller-provided prefix.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PACKAGE_ROOT="$SCRIPT_DIR"
+source "$PACKAGE_ROOT/scripts/nexum-layout-lib"
+
+PREFIX="${HOME}/.local"
+ROLLBACK_VERSION=""
+
+usage() {
+    printf '%s\n' 'uso: nexum-install [--prefix DIR] [--rollback VERSION]'
+}
+
+activate_version() {
+    local version="$1"
+    local version_root
+    local current
+    local bin_dir
+    nexum_layout_validate_version "$version" || return 2
+    version_root="$(nexum_layout_version_root "$PREFIX" "$version")"
+    nexum_layout_validate_manifest "$version_root"
+    current="$(nexum_layout_current_path "$PREFIX")"
+    bin_dir="$(nexum_layout_bin_path "$PREFIX")"
+    mkdir -p "$(dirname "$current")" "$bin_dir"
+    ln -sfn "$version" "$current.new"
+    mv -Tf "$current.new" "$current"
+    for command in nexum nexum-acp-host nexum-autologin-reconcile; do
+        ln -sfn "$(nexum_layout_linux_launcher_target "$command")" "$bin_dir/$command.new"
+        mv -Tf "$bin_dir/$command.new" "$bin_dir/$command"
+    done
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --prefix) PREFIX="$2"; shift ;;
+        --rollback) ROLLBACK_VERSION="$2"; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) printf 'nexum-install: opción desconocida: %s\n' "$1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+if [[ -n "$ROLLBACK_VERSION" ]]; then
+    activate_version "$ROLLBACK_VERSION"
+    exit 0
+fi
+
+SOURCE_BASE="$PACKAGE_ROOT/lib/nexum"
+[[ -d "$SOURCE_BASE" ]] || { printf '%s\n' 'nexum-install: InstalledLayoutV1 artifact missing' >&2; exit 1; }
+mapfile -t VERSIONS < <(find "$SOURCE_BASE" -mindepth 1 -maxdepth 1 -type d -printf '%f\n')
+[[ ${#VERSIONS[@]} -eq 1 ]] || { printf '%s\n' 'nexum-install: artifact must contain exactly one versioned runtime' >&2; exit 1; }
+VERSION="${VERSIONS[0]}"
+nexum_layout_validate_version "$VERSION" || exit 2
+SOURCE_ROOT="$SOURCE_BASE/$VERSION"
+DEST_ROOT="$(nexum_layout_version_root "$PREFIX" "$VERSION")"
+DEST_BASE="$(dirname "$DEST_ROOT")"
+STAGING_ROOT="$DEST_BASE/.staging-${VERSION}-$$"
+
+nexum_layout_validate_manifest "$SOURCE_ROOT"
+[[ ! -e "$DEST_ROOT" ]] || { printf 'nexum-install: version already installed: %s\n' "$VERSION" >&2; exit 1; }
+mkdir -p "$DEST_BASE"
+# A failed staging copy is retained for diagnosis. On success `mv` consumes the
+# directory and this no-op rmdir keeps the cleanup path non-recursive.
+trap 'rmdir "$STAGING_ROOT" 2>/dev/null || true' EXIT
+cp -a "$SOURCE_ROOT" "$STAGING_ROOT"
+nexum_layout_validate_manifest "$STAGING_ROOT" "$VERSION"
+mv "$STAGING_ROOT" "$DEST_ROOT"
+trap - EXIT
+activate_version "$VERSION"

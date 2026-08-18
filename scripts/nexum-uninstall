@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Remove one InstalledLayoutV1 runtime without touching user data or other versions.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/scripts/nexum-layout-lib"
+
+PREFIX="${HOME}/.local"
+VERSION=""
+
+usage() {
+    printf '%s\n' 'uso: nexum-uninstall [--prefix DIR] [--version VERSION]'
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --prefix) PREFIX="$2"; shift ;;
+        --version) VERSION="$2"; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) printf 'nexum-uninstall: opción desconocida: %s\n' "$1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+CURRENT="$(nexum_layout_current_path "$PREFIX")"
+if [[ -z "$VERSION" && -L "$CURRENT" ]]; then
+    VERSION="$(readlink "$CURRENT")"
+fi
+nexum_layout_validate_version "$VERSION" || exit 2
+
+VERSION_ROOT="$(nexum_layout_version_root "$PREFIX" "$VERSION")"
+[[ -d "$VERSION_ROOT" ]] || {
+    printf 'nexum-uninstall: versión no instalada: %s\n' "$VERSION" >&2
+    exit 1
+}
+
+if [[ -L "$CURRENT" && "$(readlink "$CURRENT")" == "$VERSION" ]]; then
+    rm -f "$CURRENT"
+    BIN_DIR="$(nexum_layout_bin_path "$PREFIX")"
+    for command in nexum nexum-acp-host nexum-autologin-reconcile; do
+        launcher="$BIN_DIR/$command"
+        expected="$(nexum_layout_linux_launcher_target "$command")"
+        if [[ -L "$launcher" && "$(readlink "$launcher")" == "$expected" ]]; then
+            rm -f "$launcher"
+        fi
+    done
+fi
+
+nexum_layout_validate_manifest "$VERSION_ROOT" "$VERSION"
+find "$VERSION_ROOT" -xdev -depth -delete
+printf 'runtime removido: %s\n' "$VERSION"

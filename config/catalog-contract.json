@@ -1,0 +1,26 @@
+{
+  "$schema": "nexum-catalog-contract-v1",
+  "description": "FUENTE ÚNICA de la generación del contrato del catálogo de providers. Python la escribe en el catálogo; Rust la compara al leerlo. Si los dos lados divergen, el mecanismo que detecta discrepancia entre artefactos derivados sería él mismo dos artefactos derivados que pueden discrepar — por eso vive acá y hay un test cruzado que falla si no coinciden.",
+  "generation": 4,
+  "catalog_schema_version": 2,
+  "required_providers_with_models": [
+    "codex_cli",
+    "claude_code",
+    "gemini_cli",
+    "mimo_code",
+    "opencode_zen",
+    "opencode_go"
+  ],
+  "manual_provider_ids": [],
+  "bump_rules": [
+    "Se bumpea SÓLO cuando cambia lo que el catálogo PROMETE: los campos que el binario lee para tomar una decisión.",
+    "NO se bumpea por un build nuevo, un refactor, ni un campo que nadie consume.",
+    "Ante la duda, bumpear: un falso positivo cuesta un `provider reconcile`; un falso negativo concede acceso con semántica equivocada."
+  ],
+  "history": {
+    "1": "Formato R2 original.",
+    "2": "credential_state / connect_kind / credential_store: estado y origen por provider.",
+    "3": "free_access como CONCESIÓN DE ACCESO: el binario habilita el camino sin autenticación leyendo este campo. Es la generación que la estampa custodia.",
+    "4": "manual_provider_ids vacío: se retira la fila `opencode`, alias de opencode_zen con fila propia (registry 17 contra catálogo 18). Se bumpea aunque no cambie la semántica de free_access: la generación 3 existe en dos formas incompatibles — con ['opencode'] y con [] — y un binario de una cruzado con un catálogo de la otra no lo detectaría, porque el número coincidiría. Ese cruce es exactamente el rollback. Ante la duda, bumpear."
+  }
+}

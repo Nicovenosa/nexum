@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "routes": [
+    {
+      "provider_id": "ollama_local",
+      "auth_mode": "local_no_auth",
+      "adapter": "openai_compatible",
+      "resolver": "settings",
+      "endpoint_or_cli": "http://127.0.0.1:11434/v1",
+      "upstream_provider": "ollama",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "claude_code",
+      "auth_mode": "cli_oauth",
+      "adapter": "openai_compatible",
+      "resolver": "slot_python",
+      "endpoint_or_cli": "cliproxyapi://claude",
+      "upstream_provider": "claude",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "codex_cli",
+      "auth_mode": "cli_oauth",
+      "adapter": "openai_compatible",
+      "resolver": "slot_python",
+      "endpoint_or_cli": "cliproxyapi://codex",
+      "upstream_provider": "codex",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "gemini_cli",
+      "auth_mode": "cli_oauth",
+      "adapter": "openai_compatible",
+      "resolver": "slot_python",
+      "endpoint_or_cli": "cliproxyapi://gemini",
+      "upstream_provider": "gemini",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "opencode_zen",
+      "auth_mode": "cli_account",
+      "adapter": "openai_compatible",
+      "resolver": "slot_python",
+      "endpoint_or_cli": "https://opencode.ai/zen/v1",
+      "upstream_provider": "opencode_zen",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "opencode_go",
+      "auth_mode": "cli_account",
+      "adapter": "openai_compatible",
+      "resolver": "slot_python",
+      "endpoint_or_cli": "https://opencode.ai/zen/go/v1",
+      "upstream_provider": "opencode_go",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "mimo_code",
+      "auth_mode": "direct_key",
+      "adapter": "openai_compatible",
+      "resolver": "slot_python",
+      "endpoint_or_cli": "https://token-plan-sgp.xiaomimimo.com/v1",
+      "upstream_provider": "mimo",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "anthropic_api_key",
+      "auth_mode": "static_api_key",
+      "adapter": "anthropic",
+      "resolver": "settings",
+      "endpoint_or_cli": "https://api.anthropic.com",
+      "upstream_provider": "anthropic",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "google_api_key",
+      "auth_mode": "static_api_key",
+      "adapter": "openai_compatible",
+      "resolver": "settings",
+      "endpoint_or_cli": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "upstream_provider": "google",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "openrouter",
+      "auth_mode": "static_api_key",
+      "adapter": "openai_compatible",
+      "resolver": "settings",
+      "endpoint_or_cli": "https://openrouter.ai/api/v1",
+      "upstream_provider": "openrouter",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "deepseek",
+      "auth_mode": "static_api_key",
+      "adapter": "openai_compatible",
+      "resolver": "settings",
+      "endpoint_or_cli": "https://api.deepseek.com",
+      "upstream_provider": "deepseek",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "glm",
+      "auth_mode": "static_api_key",
+      "adapter": "openai_compatible",
+      "resolver": "settings",
+      "endpoint_or_cli": "https://open.bigmodel.cn/api/paas/v4",
+      "upstream_provider": "glm",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "glm_coding_plan",
+      "auth_mode": "static_api_key",
+      "adapter": "openai_compatible",
+      "resolver": "settings",
+      "endpoint_or_cli": "https://api.z.ai/api/coding/paas/v4",
+      "upstream_provider": "glm_coding_plan",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "qwen",
+      "auth_mode": "static_api_key",
+      "adapter": "openai_compatible",
+      "resolver": "settings",
+      "endpoint_or_cli": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "upstream_provider": "qwen",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "custom_openai_compatible",
+      "auth_mode": "openai_compatible",
+      "adapter": "openai_compatible",
+      "resolver": "settings",
+      "endpoint_or_cli": "settings://base_url",
+      "upstream_provider": "custom",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "github_copilot",
+      "auth_mode": "cli_oauth",
+      "adapter": "openai_compatible",
+      "resolver": "settings",
+      "endpoint_or_cli": "github-copilot://cli",
+      "upstream_provider": "github_copilot",
+      "model_mapping": "identity"
+    },
+    {
+      "provider_id": "vercel_ai_gateway",
+      "auth_mode": "static_api_key",
+      "adapter": "openai_compatible",
+      "resolver": "settings",
+      "endpoint_or_cli": "https://ai-gateway.vercel.sh/v1",
+      "upstream_provider": "vercel",
+      "model_mapping": "identity"
+    }
+  ]
+}

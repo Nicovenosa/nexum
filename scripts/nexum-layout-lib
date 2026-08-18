@@ -1,0 +1,357 @@
+#!/usr/bin/env bash
+# Shared InstalledLayoutV1 contract. Callers provide the destination prefix.
+
+NEXUM_INSTALLED_LAYOUT_VERSION="InstalledLayoutV1"
+
+nexum_layout_validate_version() {
+    local version="$1"
+    [[ "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] || {
+        printf 'invalid version: %s\n' "$version" >&2
+        return 1
+    }
+}
+
+nexum_layout_required_payload() {
+    printf '%s\n' \
+        nexum \
+        nexum-acp-host \
+        nexum-autologin-reconcile \
+        provider-catalog-output.json \
+        provider-catalog-base.json \
+        provider-route-registry.json \
+        reserved-models.json \
+        catalog-contract.json \
+        libexec/nexum/providers/nexum_providers \
+        src/nexum_hormiguero_sidecar \
+        src/nexum_memory_gateway \
+        src/nexum_experience \
+        src/nexum_nocturno \
+        src/nexum_workers \
+        src/nexum_providers \
+        schemas \
+        LICENSE \
+        NOTICE \
+        MANIFEST.json \
+        HASHES.tsv \
+        PACKAGE_MANIFEST.json
+}
+
+nexum_layout_required_resources() {
+    printf '%s\n' \
+        provider-catalog-output.json \
+        provider-catalog-base.json \
+        provider-route-registry.json \
+        reserved-models.json \
+        catalog-contract.json \
+        libexec/nexum/providers/nexum_providers \
+        src/nexum_hormiguero_sidecar \
+        src/nexum_memory_gateway \
+        src/nexum_experience \
+        src/nexum_nocturno \
+        src/nexum_workers \
+        src/nexum_providers \
+        schemas \
+        LICENSE \
+        NOTICE
+}
+
+nexum_layout_version_root() {
+    local prefix="$1"
+    local version="$2"
+    nexum_layout_validate_version "$version" || return 1
+    printf '%s/lib/nexum/%s\n' "$prefix" "$version"
+}
+
+nexum_layout_current_path() {
+    local prefix="$1"
+    printf '%s/lib/nexum/current\n' "$prefix"
+}
+
+nexum_layout_bin_path() {
+    local prefix="$1"
+    printf '%s/bin\n' "$prefix"
+}
+
+nexum_layout_linux_launcher_target() {
+    local command="$1"
+    printf '../lib/nexum/current/%s\n' "$command"
+}
+
+nexum_layout_validate_manifest() {
+    local version_root="$1"
+    local expected_version="${2:-$(basename "$version_root")}"
+    mapfile -t expected_payload < <(nexum_layout_required_payload)
+    mapfile -t expected_resources < <(nexum_layout_required_resources)
+    python3 - "$version_root" "$expected_version" \
+        "${#expected_payload[@]}" "${expected_payload[@]}" "${expected_resources[@]}" <<'PY'
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+expected_version = sys.argv[2]
+payload_count = int(sys.argv[3])
+expected_payload = sys.argv[4:4 + payload_count]
+expected_resources = sys.argv[4 + payload_count:]
+top_level_files = {
+    "nexum",
+    "nexum-acp-host",
+    "nexum-autologin-reconcile",
+    "provider-catalog-output.json",
+    "provider-catalog-base.json",
+    "provider-route-registry.json",
+    "reserved-models.json",
+    "catalog-contract.json",
+    "LICENSE",
+    "NOTICE",
+    "MANIFEST.json",
+    "HASHES.tsv",
+}
+sidecar_dirs = {
+    "nexum_hormiguero_sidecar",
+    "nexum_memory_gateway",
+    "nexum_experience",
+    "nexum_nocturno",
+    "nexum_workers",
+    "nexum_providers",
+}
+
+
+def fail(message: str) -> None:
+    raise SystemExit(f"invalid package manifest: {message}")
+
+
+def safe_relative(raw: object) -> str:
+    if not isinstance(raw, str) or not raw:
+        fail("path must be a non-empty string")
+    candidate = Path(raw)
+    if candidate.is_absolute() or "\\" in raw or any(part in {"", ".", ".."} for part in candidate.parts):
+        fail(f"unsafe path: {raw!r}")
+    normalized = candidate.as_posix()
+    if normalized != raw:
+        fail(f"non-canonical path: {raw!r}")
+    return normalized
+
+
+def allowed_file(relative: str) -> bool:
+    if relative in top_level_files:
+        return True
+    if relative.startswith("schemas/"):
+        return True
+    if relative.startswith("libexec/nexum/providers/nexum_providers/"):
+        return relative.endswith((".py", ".json"))
+    if not relative.startswith("src/"):
+        return False
+    parts = relative.split("/")
+    return (
+        len(parts) > 2
+        and parts[1] in sidecar_dirs
+        and relative.endswith((".py", ".json"))
+    )
+
+
+if not root.is_dir():
+    fail("version root missing")
+root = root.resolve()
+try:
+    manifest = json.loads((root / "PACKAGE_MANIFEST.json").read_text(encoding="utf-8"))
+except (OSError, ValueError) as exc:
+    fail(str(exc))
+if manifest.get("layout") != "InstalledLayoutV1":
+    fail("layout")
+version = manifest.get("version")
+if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", version):
+    fail("version")
+if version != expected_version:
+    fail("version does not match version root")
+source_head = manifest.get("source_head")
+source_tree = manifest.get("source_tree")
+if not isinstance(source_head, str) or not re.fullmatch(r"[0-9a-f]{40}", source_head):
+    fail("source_head")
+if not isinstance(source_tree, str) or not re.fullmatch(r"[0-9a-f]{40}", source_tree):
+    fail("source_tree")
+required = manifest.get("required_payload")
+if not isinstance(required, list) or any(not isinstance(item, str) for item in required):
+    fail("required payload")
+if len(required) != len(set(required)) or set(required) != set(expected_payload):
+    fail("required payload contract")
+required_resources = manifest.get("required_resources")
+if (
+    not isinstance(required_resources, list)
+    or any(not isinstance(item, str) for item in required_resources)
+    or len(required_resources) != len(set(required_resources))
+    or set(required_resources) != set(expected_resources)
+):
+    fail("required resources contract")
+activation_checks = manifest.get("activation_checks")
+expected_activation_checks = {
+    "provider_route_registry_present": True,
+    "provider_route_registry_hash_valid": True,
+    "provider_route_registry_schema_valid": True,
+    "provider_route_registry_complete": True,
+}
+if activation_checks != expected_activation_checks:
+    fail("provider route activation checks")
+for relative in expected_payload:
+    path = root / relative
+    if not path.exists():
+        fail(f"required payload missing: {relative}")
+    if relative.startswith(("src/", "schemas", "libexec/")) and not path.is_dir():
+        fail(f"required payload is not a directory: {relative}")
+    if not relative.startswith(("src/", "schemas", "libexec/")) and not path.is_file():
+        fail(f"required payload is not a file: {relative}")
+files = manifest.get("files")
+if not isinstance(files, list):
+    fail("files")
+manifest_paths: set[str] = set()
+for entry in files:
+    if not isinstance(entry, dict) or set(entry) != {"path", "sha256"}:
+        fail("entry")
+    relative = safe_relative(entry["path"])
+    if relative == "PACKAGE_MANIFEST.json" or not allowed_file(relative):
+        fail(f"path outside allowed payload: {relative}")
+    if relative in manifest_paths:
+        fail(f"duplicate path: {relative}")
+    manifest_paths.add(relative)
+    digest_expected = entry["sha256"]
+    if not isinstance(digest_expected, str) or not re.fullmatch(r"[0-9a-f]{64}", digest_expected):
+        fail(f"invalid hash: {relative}")
+    path = root / relative
+    if path.resolve().parent != root and root not in path.resolve().parents:
+        fail(f"path escapes version root: {relative}")
+    if not path.is_file():
+        fail(f"manifest file missing: {relative}")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != digest_expected:
+        fail(f"hash mismatch: {relative}")
+actual_paths: set[str] = set()
+for path in root.rglob("*"):
+    if path.is_symlink():
+        fail(f"symlink payload: {path.relative_to(root).as_posix()}")
+    if path.is_file() and path.name != "PACKAGE_MANIFEST.json":
+        relative = path.relative_to(root).as_posix()
+        if not allowed_file(relative):
+            fail(f"file outside allowed payload: {relative}")
+        actual_paths.add(relative)
+if actual_paths != manifest_paths:
+    fail("manifest file set does not match payload")
+
+try:
+    overlay = json.loads((root / "MANIFEST.json").read_text(encoding="utf-8"))
+except (OSError, ValueError) as exc:
+    fail(f"MANIFEST.json: {exc}")
+if overlay.get("layout") != "InstalledLayoutV1":
+    fail("MANIFEST.json layout")
+if overlay.get("slot") != version:
+    fail("MANIFEST.json slot")
+if overlay.get("source_head") != source_head or overlay.get("source_tree") != source_tree:
+    fail("manifest provenance mismatch")
+binary_hashes = overlay.get("binary_sha256")
+if not isinstance(binary_hashes, dict):
+    fail("MANIFEST.json binary hashes")
+for binary in ("nexum", "nexum-acp-host"):
+    digest = binary_hashes.get(binary)
+    if digest != hashlib.sha256((root / binary).read_bytes()).hexdigest():
+        fail(f"MANIFEST.json binary hash: {binary}")
+resource_hashes = overlay.get("resource_sha256")
+if not isinstance(resource_hashes, dict):
+    fail("MANIFEST.json resource hashes")
+for resource in (
+    "provider-catalog-output.json",
+    "provider-catalog-base.json",
+    "provider-route-registry.json",
+):
+    digest = resource_hashes.get(resource)
+    if digest != hashlib.sha256((root / resource).read_bytes()).hexdigest():
+        fail(f"MANIFEST.json resource hash: {resource}")
+if overlay.get("required_payload") != required:
+    fail("MANIFEST.json required payload")
+if overlay.get("required_resources") != required_resources:
+    fail("MANIFEST.json required resources")
+if overlay.get("activation_checks") != activation_checks:
+    fail("MANIFEST.json provider route activation checks")
+
+try:
+    lines = (root / "HASHES.tsv").read_text(encoding="utf-8").splitlines()
+except OSError as exc:
+    fail(f"HASHES.tsv: {exc}")
+if not lines or lines[0] != "sha256\tpath":
+    fail("HASHES.tsv header")
+hash_paths: set[str] = set()
+for line in lines[1:]:
+    parts = line.split("\t")
+    if len(parts) != 2 or not re.fullmatch(r"[0-9a-f]{64}", parts[0]):
+        fail("HASHES.tsv row")
+    relative = safe_relative(parts[1])
+    if relative in {"HASHES.tsv", "PACKAGE_MANIFEST.json"} or relative in hash_paths:
+        fail(f"HASHES.tsv path: {relative}")
+    path = root / relative
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != parts[0]:
+        fail(f"HASHES.tsv mismatch: {relative}")
+    hash_paths.add(relative)
+expected_hash_paths = actual_paths - {"HASHES.tsv"}
+if hash_paths != expected_hash_paths:
+    fail("HASHES.tsv file set does not match payload")
+
+try:
+    registry = json.loads((root / "provider-route-registry.json").read_text(encoding="utf-8"))
+    catalog = json.loads((root / "provider-catalog-output.json").read_text(encoding="utf-8"))
+except (OSError, ValueError) as exc:
+    fail(f"provider route registry: {exc}")
+if registry.get("schema_version") != 1:
+    fail("provider route registry schema")
+routes = registry.get("routes")
+if not isinstance(routes, list) or not routes:
+    fail("provider route registry routes")
+route_ids: set[str] = set()
+for route in routes:
+    if not isinstance(route, dict):
+        fail("provider route entry")
+    provider_id = route.get("provider_id")
+    if not isinstance(provider_id, str) or not provider_id or provider_id in route_ids:
+        fail("provider route provider_id")
+    route_ids.add(provider_id)
+    for field in (
+        "auth_mode",
+        "adapter",
+        "resolver",
+        "upstream_provider",
+        "endpoint_or_cli",
+        "model_mapping",
+    ):
+        if not isinstance(route.get(field), str) or not route[field]:
+            fail(f"provider route field: {provider_id}.{field}")
+    if route["model_mapping"] != "identity":
+        fail(f"provider route model mapping: {provider_id}")
+    overrides = route.get("model_overrides", {})
+    if (
+        not isinstance(overrides, dict)
+        or any(
+            not isinstance(source, str)
+            or not source
+            or not isinstance(target, str)
+            or not target
+            for source, target in overrides.items()
+        )
+    ):
+        fail(f"provider route model overrides: {provider_id}")
+providers = catalog.get("providers")
+if not isinstance(providers, list):
+    fail("provider catalog providers")
+catalog_ids: set[str] = set()
+for provider in providers:
+    if not isinstance(provider, dict):
+        fail("provider catalog entry")
+    provider_id = provider.get("provider_id") or provider.get("id")
+    if not isinstance(provider_id, str) or not provider_id or provider_id in catalog_ids:
+        fail("provider catalog provider_id")
+    catalog_ids.add(provider_id)
+    models = provider.get("models") or provider.get("models_detected") or []
+    if not isinstance(models, list) or any(not isinstance(model, str) or not model for model in models):
+        fail(f"provider catalog models: {provider_id}")
+if route_ids != catalog_ids:
+    fail("provider route registry completeness")
+PY
+}

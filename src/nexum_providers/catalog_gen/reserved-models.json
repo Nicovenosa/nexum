@@ -1,0 +1,23 @@
+{
+  "$schema": "nexum-reserved-models-v0",
+  "version": "0",
+  "description": "Canonical source of truth for Nexum reserved-model policy. Models listed here are internal_only (reserved for the Hormiguero) and are filtered from user-facing surfaces (/modelo, /proveedor model lists, Resolver recommendations). They remain available in Ollama for internal Hormiguero callers. This file is the single source; the Rust /modelo filter (peri-tui/src/app/model_panel.rs DEFAULT_RESERVED_INTERNAL_MODELS), the Provider Resolver, and the Provider Catalog all mirror it. Updated: 2026-07-03.",
+  "policy_principles": [
+    "A reserved model is NOT a user-facing model.",
+    "user_selectable=false => hidden from /modelo and not certifiable as the main runtime model.",
+    "visibility=internal_only => not shown as a normal selectable option in /proveedor.",
+    "The Hormiguero may use reserved models internally; the user chat runtime may not.",
+    "Never delete a reserved model from Ollama; only hide/protect it in Nexum.",
+    "If every detected model is reserved and none is user-facing, surface an explicit error (no silent fallback)."
+  ],
+  "reserved_models": [
+    {
+      "provider": "ollama",
+      "model": "qwen3:0.6b",
+      "reserved_for": "hormiguero.low.worker",
+      "user_selectable": false,
+      "visibility": "internal_only",
+      "reason": "Modelo interno reservado para obreros del Hormiguero low-cost; evitar competencia de memoria con runtime principal."
+    }
+  ]
+}

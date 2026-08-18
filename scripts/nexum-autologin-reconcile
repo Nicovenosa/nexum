@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Installed R2 provider reconcile. Safe by default: observes local sources only,
+# never starts OAuth, and writes the live catalog under XDG data.
+set -euo pipefail
+
+QUIET=0
+for arg in "$@"; do
+    case "$arg" in
+        --quiet) QUIET=1 ;;
+        -h|--help)
+            printf '%s\n' 'uso: nexum-autologin-reconcile [--quiet]'
+            exit 0
+            ;;
+        *)
+            printf '%s\n' 'provider reconcile: opción desconocida' >&2
+            exit 2
+            ;;
+    esac
+done
+
+# `$0` llega como symlink desde ~/.local/bin: sin resolverlo, SCRIPT_DIR apunta
+# a ~/.local/bin y el base catalog "no existe" aunque el slot lo tenga.
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# The script is shipped in the version root; never ascend into a checkout.
+ROOT="$SCRIPT_DIR"
+PYTHON_ROOT="$ROOT/src"
+BASE="$ROOT/provider-catalog-base.json"
+
+if [[ ! -f "$BASE" ]]; then
+    printf '%s\n' 'provider reconcile failed: installed base catalog missing' >&2
+    exit 1
+fi
+
+export PYTHONPATH="$PYTHON_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONDONTWRITEBYTECODE=1
+if [[ "$QUIET" -eq 1 ]]; then
+    exec python3 -m nexum_providers.reconcile --base "$BASE" --quiet
+fi
+exec python3 -m nexum_providers.reconcile --base "$BASE"

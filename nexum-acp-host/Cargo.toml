@@ -1,0 +1,27 @@
+[package]
+name = "nexum-acp-host"
+version.workspace = true
+edition.workspace = true
+description = "Standalone local Unix-socket host for the shared Nexum ACP runtime"
+
+[[bin]]
+name = "nexum-acp-host"
+path = "src/main.rs"
+
+[dependencies]
+nexum-acp = { path = "../nexum-acp" }
+nexum-agent = { path = "../nexum-agent" }
+nexum-middlewares = { path = "../nexum-middlewares" }
+tokio.workspace = true
+parking_lot.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+dirs-next.workspace = true
+clap.workspace = true
+chrono.workspace = true
+libc = "0.2"
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+nexum-tui = { path = "../nexum-tui" }

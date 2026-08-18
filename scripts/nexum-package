@@ -1,0 +1,332 @@
+#!/usr/bin/env bash
+# Build an InstalledLayoutV1 Linux artifact without checkout-only payloads.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/nexum-layout-lib"
+
+if [[ "${1:-}" == "--validate-manifest" ]]; then
+    [[ $# -eq 2 ]] || { printf '%s\n' 'uso: nexum-package --validate-manifest <version-root>' >&2; exit 2; }
+    nexum_layout_validate_manifest "$2"
+    exit 0
+fi
+
+VERSION="${1:?uso: nexum-package <version> [dist_dir]}"
+nexum_layout_validate_version "$VERSION" || exit 2
+DIST_DIR="${2:-$CLI_DIR/dist}"
+SOURCE_HEAD="${NEXUM_SOURCE_HEAD:-}"
+SOURCE_TREE="${NEXUM_SOURCE_TREE:-}"
+[[ "$SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]] || {
+    printf '%s\n' 'falta NEXUM_SOURCE_HEAD válido (40 hex)' >&2
+    exit 2
+}
+# El árbol tiene que estar LIMPIO. Con cambios sin commitear, el binario sale de
+# un estado que ningún commit describe, pero SOURCE_TREE apunta al de HEAD: el
+# manifiesto declararía una procedencia falsa, que es exactamente lo que
+# PKG-SOURCE-PROVENANCE existe para atrapar. Pasó el 2026-08-01.
+if [[ -z "${NEXUM_ALLOW_DIRTY_TREE:-}" ]]; then
+    if ! git -C "$CLI_DIR" diff --quiet HEAD 2>/dev/null; then
+        printf '%s\n' 'el árbol tiene cambios sin commitear: el manifiesto declararía' >&2
+        printf '%s\n' 'una procedencia que no corresponde al binario. Commiteá, o forzá' >&2
+        printf '%s\n' 'con NEXUM_ALLOW_DIRTY_TREE=1 sabiendo que la procedencia miente.' >&2
+        git -C "$CLI_DIR" status --porcelain >&2
+        exit 1
+    fi
+fi
+
+[[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]] || {
+    printf '%s\n' 'falta NEXUM_SOURCE_TREE válido (40 hex)' >&2
+    exit 2
+}
+NAME="nexum-${VERSION}-linux-x86_64"
+OUT="$DIST_DIR/$NAME"
+VERSION_ROOT="$OUT/lib/nexum/$VERSION"
+RELEASE_DIR="${NEXUM_RELEASE_DIR:-$CLI_DIR/target/release}"
+BIN="$RELEASE_DIR/nexum"
+ACP_HOST="$RELEASE_DIR/nexum-acp-host"
+
+[[ -x "$BIN" ]] || { printf 'falta el binario release: %s\n' "$BIN" >&2; exit 1; }
+[[ -x "$ACP_HOST" ]] || { printf 'falta nexum-acp-host: %s\n' "$ACP_HOST" >&2; exit 1; }
+BIN_VERSION="$("$BIN" --version 2>/dev/null | grep -oiE 'nexum [0-9][^ ]*' | awk '{print $2}')"
+[[ "$VERSION" == "$BIN_VERSION" || "$VERSION" == "$BIN_VERSION"+* ]] || {
+    printf "binario dice '%s' y el slot pide '%s'\n" "$BIN_VERSION" "$VERSION" >&2
+    exit 1
+}
+[[ ! -e "$OUT" ]] || { printf 'el artefacto ya existe: %s\n' "$OUT" >&2; exit 1; }
+
+# Validate the exact source catalog before any staging side effect. This uses
+# the same versioned contract that the Rust loader embeds, so a stale catalog
+# cannot be packaged under the provenance of a newer commit.
+python3 - "$CLI_DIR/config/provider-catalog-base.json" "$CLI_DIR/config/catalog-contract.json" "$CLI_DIR/config/provider-route-registry.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+catalog_path = Path(sys.argv[1])
+contract_path = Path(sys.argv[2])
+route_path = Path(sys.argv[3])
+
+try:
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    route_registry = json.loads(route_path.read_text(encoding="utf-8"))
+except (OSError, ValueError) as exc:
+    raise SystemExit(f"INVALID_PROVIDER_CATALOG: {exc}")
+
+expected_schema = contract.get("catalog_schema_version")
+observed_schema = catalog.get("schema_version")
+if observed_schema != expected_schema:
+    raise SystemExit(
+        "SCHEMA_VERSION_MISMATCH: "
+        f"schema_version expected={expected_schema!r} observed={observed_schema!r}"
+    )
+
+providers = catalog.get("providers")
+if not isinstance(providers, list) or not providers:
+    raise SystemExit("REQUIRED_FIELD_MISSING: providers")
+
+provider_ids = set()
+for index, provider in enumerate(providers):
+    if not isinstance(provider, dict):
+        raise SystemExit(f"PROVIDER_ENTRY_INVALID: providers[{index}] must be an object")
+    provider_id = provider.get("provider_id") or provider.get("id")
+    display_name = provider.get("display_name")
+    if not isinstance(provider_id, str) or not provider_id:
+        raise SystemExit(
+            f"REQUIRED_FIELD_MISSING: providers[{index}].provider_id"
+        )
+    if provider_id in provider_ids:
+        raise SystemExit(f"DUPLICATE_PROVIDER_ID: {provider_id}")
+    provider_ids.add(provider_id)
+    if not isinstance(display_name, str) or not display_name:
+        raise SystemExit(
+            f"REQUIRED_FIELD_MISSING: providers[{index}].display_name"
+        )
+    policy = provider.get("model_policy") or {}
+    models = (
+        policy.get("user_facing_models")
+        or policy.get("selectable_models")
+        or provider.get("models")
+        or provider.get("models_detected")
+        or []
+    )
+    if not isinstance(models, list) or any(not isinstance(m, str) or not m for m in models):
+        raise SystemExit(
+            f"MODEL_ENTRY_INVALID: providers[{index}].models provider_id={provider_id}"
+        )
+    if len(models) != len(set(models)):
+        raise SystemExit(f"DUPLICATE_MODEL_ID: provider_id={provider_id}")
+
+for provider_id in contract.get("required_providers_with_models", []):
+    provider = next(
+        (p for p in providers if (p.get("provider_id") or p.get("id")) == provider_id),
+        None,
+    )
+    if provider is None:
+        raise SystemExit(f"REQUIRED_FIELD_MISSING: provider_id={provider_id}")
+    policy = provider.get("model_policy") or {}
+    models = (
+        policy.get("user_facing_models")
+        or policy.get("selectable_models")
+        or provider.get("models")
+        or provider.get("models_detected")
+        or []
+    )
+    if not models:
+        index = providers.index(provider)
+        raise SystemExit(
+            "PROVIDER_ENTRY_INVALID: "
+            f"providers[{index}].models provider_id={provider_id} must be non-empty"
+        )
+
+for provider_id in contract.get("manual_provider_ids", []):
+    if provider_id not in provider_ids:
+        raise SystemExit(f"REQUIRED_FIELD_MISSING: manual provider_id={provider_id}")
+
+if route_registry.get("schema_version") != 1:
+    raise SystemExit("PROVIDER_ROUTE_SCHEMA_MISMATCH")
+routes = route_registry.get("routes")
+if not isinstance(routes, list):
+    raise SystemExit("PROVIDER_ROUTE_REGISTRY_INVALID: routes")
+route_ids = set()
+for route in routes:
+    if not isinstance(route, dict):
+        raise SystemExit("PROVIDER_ROUTE_REGISTRY_INVALID: route")
+    provider_id = route.get("provider_id")
+    if not isinstance(provider_id, str) or not provider_id:
+        raise SystemExit("PROVIDER_ROUTE_REGISTRY_INVALID: provider_id")
+    if provider_id in route_ids:
+        raise SystemExit(f"DUPLICATE_PROVIDER_ROUTE: {provider_id}")
+    route_ids.add(provider_id)
+    for field in (
+        "auth_mode", "adapter", "resolver", "endpoint_or_cli",
+        "upstream_provider", "model_mapping",
+    ):
+        if not isinstance(route.get(field), str) or not route[field]:
+            raise SystemExit(
+                f"PROVIDER_ROUTE_REGISTRY_INVALID: provider_id={provider_id} field={field}"
+            )
+    if route["model_mapping"] != "identity":
+        raise SystemExit(
+            f"PROVIDER_ROUTE_REGISTRY_INVALID: provider_id={provider_id} model_mapping"
+        )
+if route_ids != provider_ids:
+    raise SystemExit(
+        "CATALOG_ROUTE_PROVIDER_MISMATCH: "
+        f"catalog_only={sorted(provider_ids-route_ids)} route_only={sorted(route_ids-provider_ids)}"
+    )
+PY
+
+mkdir -p "$VERSION_ROOT/schemas" "$VERSION_ROOT/libexec/nexum/providers" "$OUT/bin" "$OUT/scripts"
+cp "$BIN" "$VERSION_ROOT/nexum"
+cp "$ACP_HOST" "$VERSION_ROOT/nexum-acp-host"
+cp "$SCRIPT_DIR/nexum-autologin-reconcile" "$VERSION_ROOT/nexum-autologin-reconcile"
+chmod 755 "$VERSION_ROOT/nexum" "$VERSION_ROOT/nexum-acp-host" "$VERSION_ROOT/nexum-autologin-reconcile"
+cp "$CLI_DIR/config/provider-catalog-base.json" "$VERSION_ROOT/provider-catalog-base.json"
+cp "$CLI_DIR/config/provider-catalog-base.json" "$VERSION_ROOT/provider-catalog-output.json"
+cp "$CLI_DIR/config/provider-route-registry.json" "$VERSION_ROOT/provider-route-registry.json"
+cp "$CLI_DIR/src/nexum_providers/catalog_gen/reserved-models.json" "$VERSION_ROOT/reserved-models.json"
+# Fuente única de la generación del contrato: DEBE viajar en el slot. Sin él,
+# el runtime lee "sin estampa" y el tier libre queda caído en la instalación
+# real aunque ande en el checkout.
+cp "$CLI_DIR/config/catalog-contract.json" "$VERSION_ROOT/catalog-contract.json"
+cp "$CLI_DIR/LICENSE" "$VERSION_ROOT/LICENSE"
+cp "$CLI_DIR/NOTICE" "$VERSION_ROOT/NOTICE"
+
+if [[ -d "$CLI_DIR/schemas" ]]; then
+    cp -a "$CLI_DIR/schemas/." "$VERSION_ROOT/schemas/"
+fi
+for sidecar in \
+    nexum_hormiguero_sidecar \
+    nexum_memory_gateway \
+    nexum_experience \
+    nexum_nocturno \
+    nexum_workers \
+    nexum_providers; do
+    source_dir="$CLI_DIR/src/$sidecar"
+    destination_dir="$VERSION_ROOT/src/$sidecar"
+    [[ -d "$source_dir" ]] || { printf 'sidecar productivo ausente: %s\n' "$sidecar" >&2; exit 1; }
+    while IFS= read -r -d '' source_file; do
+        relative="${source_file#"$source_dir/"}"
+        mkdir -p "$destination_dir/$(dirname "$relative")"
+        cp "$source_file" "$destination_dir/$relative"
+    done < <(find "$source_dir" -type f \( -name '*.py' -o -name '*.json' \) ! -path '*/__pycache__/*' -print0)
+done
+
+# Provider activation has a release-stable path independent of checkout/CWD.
+# Copy the complete Python package, not a lone provider_resolve.py, so every
+# import used by the resolver travels in MANIFEST/HASHES.
+provider_libexec="$VERSION_ROOT/libexec/nexum/providers/nexum_providers"
+mkdir -p "$provider_libexec"
+while IFS= read -r -d '' source_file; do
+    relative="${source_file#"$CLI_DIR/src/nexum_providers/"}"
+    mkdir -p "$provider_libexec/$(dirname "$relative")"
+    cp "$source_file" "$provider_libexec/$relative"
+done < <(find "$CLI_DIR/src/nexum_providers" -type f \( -name '*.py' -o -name '*.json' \) ! -path '*/__pycache__/*' -print0)
+
+mapfile -t REQUIRED_PAYLOAD < <(nexum_layout_required_payload)
+mapfile -t REQUIRED_RESOURCES < <(nexum_layout_required_resources)
+python3 - "$VERSION_ROOT" "$VERSION" "$SOURCE_HEAD" "$SOURCE_TREE" \
+    "${#REQUIRED_PAYLOAD[@]}" "${REQUIRED_PAYLOAD[@]}" "${REQUIRED_RESOURCES[@]}" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+version = sys.argv[2]
+source_head = sys.argv[3]
+source_tree = sys.argv[4]
+payload_count = int(sys.argv[5])
+required = sys.argv[6:6 + payload_count]
+required_resources = sys.argv[6 + payload_count:]
+activation_checks = {
+    "provider_route_registry_present": True,
+    "provider_route_registry_hash_valid": True,
+    "provider_route_registry_schema_valid": True,
+    "provider_route_registry_complete": True,
+}
+
+
+def digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+(root / "MANIFEST.json").write_text(
+    json.dumps(
+        {
+            "layout": "InstalledLayoutV1",
+            "slot": version,
+            "source_head": source_head,
+            "source_tree": source_tree,
+            "feature": "canonical-runtime-packaging",
+            "binary_sha256": {
+                "nexum": digest(root / "nexum"),
+                "nexum-acp-host": digest(root / "nexum-acp-host"),
+            },
+            "resource_sha256": {
+                "provider-catalog-output.json": digest(root / "provider-catalog-output.json"),
+                "provider-catalog-base.json": digest(root / "provider-catalog-base.json"),
+                "provider-route-registry.json": digest(root / "provider-route-registry.json"),
+            },
+            "required_payload": required,
+            "required_resources": required_resources,
+            "activation_checks": activation_checks,
+            "status": "packaged",
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
+    + "\n",
+    encoding="utf-8",
+)
+
+hash_lines = ["sha256\tpath"]
+for path in sorted(root.rglob("*")):
+    if path.is_file() and path.name not in {"HASHES.tsv", "PACKAGE_MANIFEST.json"}:
+        hash_lines.append(f"{digest(path)}\t{path.relative_to(root).as_posix()}")
+(root / "HASHES.tsv").write_text("\n".join(hash_lines) + "\n", encoding="utf-8")
+
+files = []
+for path in sorted(root.rglob("*")):
+    if path.is_file() and path.name != "PACKAGE_MANIFEST.json":
+        files.append({
+            "path": path.relative_to(root).as_posix(),
+            "sha256": digest(path),
+        })
+(root / "PACKAGE_MANIFEST.json").write_text(
+    json.dumps(
+        {
+            "layout": "InstalledLayoutV1",
+            "version": version,
+            "source_head": source_head,
+            "source_tree": source_tree,
+            "required_payload": required,
+            "required_resources": required_resources,
+            "activation_checks": activation_checks,
+            "files": files,
+        },
+        indent=2,
+        ensure_ascii=False,
+    ) + "\n",
+    encoding="utf-8",
+)
+PY
+nexum_layout_validate_manifest "$VERSION_ROOT"
+
+ln -s "$VERSION" "$OUT/lib/nexum/current"
+for command in nexum nexum-acp-host nexum-autologin-reconcile; do
+    ln -s "$(nexum_layout_linux_launcher_target "$command")" "$OUT/bin/$command"
+done
+
+# Bootstrap tools live outside the installed runtime contract.
+cp "$SCRIPT_DIR/nexum-install" "$OUT/nexum-install"
+cp "$SCRIPT_DIR/nexum-uninstall" "$OUT/nexum-uninstall"
+cp "$SCRIPT_DIR/nexum-layout-lib" "$OUT/scripts/nexum-layout-lib"
+chmod 755 "$OUT/nexum-install" "$OUT/nexum-uninstall"
+
+(cd "$DIST_DIR" && tar --sort=name --owner=0 --group=0 --numeric-owner \
+    --mtime='2026-07-20 00:00:00' -czf "$NAME.tar.gz" "$NAME")
+sha256sum "$DIST_DIR/$NAME.tar.gz" > "$DIST_DIR/$NAME.tar.gz.sha256"
+printf 'artefacto: %s\n' "$OUT"

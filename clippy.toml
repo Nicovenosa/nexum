@@ -1,0 +1,16 @@
+# `std::env::temp_dir()` queda prohibido fuera del sandbox.
+#
+# El proyecto acumuló siete usos con nombre FIJO contra cuatro con PID, y dos de
+# los fijos eran bugs de producción: /tmp/zen-threads.db compartido entre
+# instancias (el historial del usuario) y /tmp/nexum-settings-override.json
+# pisándose entre invocaciones.
+#
+# La causa no fue descuido: nunca hubo un solo lugar del que colgar, así que
+# escribir la versión mala costaba menos que la buena. Este lint invierte eso —
+# ahora la mala no compila y la buena está a un `sandbox::temp_dir_for()`.
+#
+# Una regla que hay que acordarse de seguir es disciplina; una que el
+# compilador aplica es estructura.
+disallowed-methods = [
+    { path = "std::env::temp_dir", reason = "usá nexum_agent::sandbox::temp_dir_for(), que aísla por PID. Un nombre fijo en /tmp lo comparten todas las instancias" },
+]

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# nexum-demo — arranca Nexum con el stack de demo completo en un solo comando.
+#
+# Existe para no tener que acordarse de dos variables de entorno. No reemplaza
+# a `nexum`: lo envuelve. Todo lo que hace es exportar los dos flags y delegar.
+#
+#   NEXUM_LOCAL_FAST=1           → ruta DIRECT_CHAT (chat sin loop de tools)
+#   NEXUM_PROVIDER_CONNECT_V2=1  → resolver directo de providers: promueve a
+#                                  usable los providers puenteados cuya
+#                                  credencial prueba modelos vivos
+#
+# Ambos son opt-in y default OFF en el binario. Sin este wrapper, `nexum` se
+# comporta exactamente como antes de este sprint.
+#
+# Uso:
+#   nexum-demo                 # TUI con el stack de demo
+#   nexum-demo doctor          # cualquier subcomando de nexum
+#   nexum-demo provider reconcile
+#
+# Nota: el catálogo de providers NO se refresca solo al abrir la TUI. Si
+# cambiaste credenciales o acabás de instalar, corré primero:
+#   nexum-demo provider reconcile
+
+set -euo pipefail
+
+export NEXUM_LOCAL_FAST=1
+export NEXUM_PROVIDER_CONNECT_V2=1
+
+# Resolver el `nexum` real sin recursión: si este script se instaló como
+# ~/.local/bin/nexum-demo, el binario hermano es ~/.local/bin/nexum.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -x "$SCRIPT_DIR/nexum" ]]; then
+    NEXUM_BIN="$SCRIPT_DIR/nexum"
+elif command -v nexum >/dev/null 2>&1; then
+    NEXUM_BIN="$(command -v nexum)"
+else
+    printf '%s\n' "nexum-demo: no encontré el binario 'nexum' en $SCRIPT_DIR ni en el PATH." >&2
+    exit 127
+fi
+
+if [[ "${NEXUM_DEMO_VERBOSE:-0}" == "1" ]]; then
+    printf '%s\n' "nexum-demo: NEXUM_LOCAL_FAST=1 NEXUM_PROVIDER_CONNECT_V2=1 → $NEXUM_BIN" >&2
+fi
+
+exec "$NEXUM_BIN" "$@"

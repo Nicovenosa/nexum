@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Hook de pre-commit VERSIONADO.
+#
+# Antes esto vivía sólo en lefthook.yml, y lefthook no está instalado: la
+# configuración existía y no la ejecutaba nadie. Un hook configurado que nadie
+# corre es lo mismo que no tenerlo — y peor, porque da la impresión de que hay
+# una red.
+#
+# Se activa con: git config core.hooksPath .githooks
+#
+# BARATO A PROPÓSITO. Un pre-commit de minutos es uno que se saltea con
+# --no-verify, y ahí volvemos a no tener nada. Reusa el target caliente si
+# NEXUM_HOOK_TARGET_DIR está seteado, y sólo mira los crates cuyos .rs cambiaron.
+set -euo pipefail
+
+CAMBIADOS="$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)"
+[[ -z "$CAMBIADOS" ]] && exit 0
+
+PAQUETES=()
+for c in nexum-agent nexum-acp nexum-acp-host nexum-tui nexum-middlewares nexum-web-pty; do
+    grep -q "^$c/" <<< "$CAMBIADOS" && PAQUETES+=(-p "$c")
+done
+[[ ${#PAQUETES[@]} -eq 0 ]] && exit 0
+
+export CARGO_TARGET_DIR="${NEXUM_HOOK_TARGET_DIR:-${CARGO_TARGET_DIR:-target}}"
+echo "pre-commit: clippy sobre ${#PAQUETES[@]} paquete(s) tocado(s)…"
+
+# El exit code sale de CARGO, no de un grep al final del pipe. La primera
+# versión de este hook usaba `if ! cargo ... | grep ... | head`, y el exit del
+# pipeline era el de `head`, que devuelve 0 casi siempre: el hook dijo OK sobre
+# un árbol que NO compilaba. Es el mismo error del `tail` que se comió el exit
+# de cargo, en la herramienta que existe para atraparlo.
+SALIDA="$(mktemp)"
+trap 'rm -f "$SALIDA"' EXIT
+if cargo clippy "${PAQUETES[@]}" --all-targets -- -D clippy::disallowed_methods >"$SALIDA" 2>&1; then
+    echo "pre-commit: OK"
+    exit 0
+fi
+grep -E 'disallowed method|^error' "$SALIDA" | head -10 >&2
+cat >&2 <<'MSG'
+
+pre-commit: RECHAZADO por clippy. El detalle está arriba.
+
+  Si es `disallowed method std::env::temp_dir`: usá
+  nexum_agent::sandbox::temp_dir_for(), que aísla por PID, o agregá
+  #[allow(clippy::disallowed_methods)] CON EL MOTIVO en la línea. Un allow sin
+  razón es por donde vuelve a crecer.
+
+  Si es otro lint: clippy tiene lints del grupo `correctness` en deny por
+  default, y esos marcan bugs reales, no estilo.
+MSG
+exit 1
