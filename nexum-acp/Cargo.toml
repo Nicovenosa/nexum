@@ -24,6 +24,7 @@ tracing.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 libc.workspace = true
+interprocess = { version = "2.4.3", features = ["tokio"] }
 uuid.workspace = true
 chrono.workspace = true
 dashmap = "6"

@@ -86,12 +86,16 @@ impl Recorder {
 }
 
 /// SIGTERM sin dependencias nuevas (libc ya está en el árbol vía deps).
+#[cfg(unix)]
 unsafe fn libc_kill(pid: i32) {
     unsafe extern "C" {
         fn kill(pid: i32, sig: i32) -> i32;
     }
     unsafe { kill(pid, 15) };
 }
+
+#[cfg(not(unix))]
+unsafe fn libc_kill(_pid: i32) {}
 
 /// Borra el WAV — se llama SIEMPRE tras transcribir (ok o error).
 pub fn discard_wav(path: &Path) {

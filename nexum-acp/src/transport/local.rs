@@ -1,7 +1,7 @@
 //! Cliente ACP local para el socket Unix del host durable.
 //!
 //! No redefine framing: delega toda la serializacion y el backpressure a
-//! [`UnixTransport`]. Solo agrega conexion y validacion de disponibilidad.
+//! [`SocketTransport`]. Solo agrega conexion y validacion de disponibilidad.
 
 use std::{
     ffi::OsStr,
@@ -14,13 +14,31 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-use tokio::{net::UnixStream, time::timeout};
+use interprocess::local_socket::{
+    tokio::prelude::*, GenericFilePath, GenericNamespaced,
+};
+pub use interprocess::local_socket::tokio::Stream as LocalSocketStream;
+use tokio::time::timeout;
 
 use super::{
     types::{AcpError, IncomingMessage, RequestId},
-    unix::{UnixTransport, LOCAL_PROTOCOL_VERSION},
+    socket::{SocketTransport, LOCAL_PROTOCOL_VERSION},
     AcpTransport,
 };
+
+/// Nombre de socket local portable: named pipe por namespace en Windows y
+/// unix socket por filesystem path en Unix. Un solo code path para ambas.
+pub fn local_socket_name(path: &Path) -> Result<interprocess::local_socket::Name<'_>, io::Error> {
+    let text = path.to_str().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "local socket path must be UTF-8")
+    })?;
+    if cfg!(windows) {
+        text.to_ns_name::<GenericNamespaced>()
+    } else {
+        text.to_fs_name::<GenericFilePath>()
+    }
+    .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))
+}
 
 /// Error de conexion local sin incluir parametros ACP ni datos de usuario.
 #[derive(Debug)]
@@ -311,11 +329,11 @@ pub fn ensure_private_runtime_directory(path: &Path) -> Result<(), RuntimeDirect
 
 /// Cliente conectado al host ACP local.
 ///
-/// Al descartarse el ultimo `Arc`, `UnixTransport` cierra ambas mitades del
+/// Al descartarse el ultimo `Arc`, `SocketTransport` cierra ambas mitades del
 /// stream y sus loops acotados terminan; nunca controla el proceso del host.
 pub struct LocalAcpTransport {
     socket_path: PathBuf,
-    inner: Arc<UnixTransport>,
+    inner: Arc<SocketTransport>,
 }
 
 impl fmt::Debug for LocalAcpTransport {
@@ -337,7 +355,8 @@ impl LocalAcpTransport {
     }
 
     /// Connects once, validates the identity of the peer on that exact
-    /// [`UnixStream`], and only then constructs the RPC transport and sends the
+    /// local socket stream, and only then constructs the RPC transport and
+    /// sends the
     /// readiness handshake. A rejected stream is dropped without sending bytes.
     pub async fn connect_ready_guarded<F>(
         path: impl AsRef<Path>,
@@ -345,20 +364,21 @@ impl LocalAcpTransport {
         verify_peer: F,
     ) -> Result<Self, LocalTransportError>
     where
-        F: FnOnce(&UnixStream) -> Result<(), String>,
+        F: FnOnce(&LocalSocketStream) -> Result<(), String>,
     {
         let socket_path = path.as_ref().to_path_buf();
         timeout(budget, async {
-            let stream = UnixStream::connect(&socket_path)
+                let name = local_socket_name(&socket_path).map_err(LocalTransportError::Connect)?;
+                let stream = LocalSocketStream::connect(name)
                 .await
                 .map_err(LocalTransportError::Connect)?;
-            verify_peer(&stream).map_err(LocalTransportError::HostIdentity)?;
-            let transport = Self {
+                verify_peer(&stream).map_err(LocalTransportError::HostIdentity)?;
+                let transport = Self {
                 socket_path,
-                inner: Arc::new(UnixTransport::from_stream(stream)),
+                inner: Arc::new(SocketTransport::from_stream(stream)),
             };
             transport.verify_ready().await?;
-            Ok(transport)
+                Ok(transport)
         })
         .await
         .map_err(|_| LocalTransportError::TimedOut)?

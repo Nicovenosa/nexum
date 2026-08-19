@@ -133,7 +133,7 @@ async fn structured_transport_failure_is_forwarded_exactly_once() {
     client.spawn_pump();
     server
         .send_notification(
-            nexum_acp::transport::unix::TRANSPORT_CLOSED_METHOD,
+            nexum_acp::transport::socket::TRANSPORT_CLOSED_METHOD,
             json!({
                 "classification": "SOCKET_EOF",
                 "reason_code": "ACP_PEER_CLOSED",

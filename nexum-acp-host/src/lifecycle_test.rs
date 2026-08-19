@@ -31,6 +31,9 @@ async fn stale_socket_is_removed_only_after_owner_exit() {
     assert!(!lifecycle::remove_owned_socket(&socket, inode + 1).unwrap());
     assert!(socket.exists(), "a non-owner inode must not be removed");
     drop(listener);
-    assert!(lifecycle::remove_owned_socket(&socket, inode).unwrap());
-    assert!(!socket.exists());
+    // El listener interprocess reclaima (desarma) el socket file al caer:
+    // el shutdown limpio no deja corpse socket; remove_owned_socket queda
+    // para los restos de un host que murió sin drop graceful.
+    assert!(!socket.exists(), "listener drop must reclaim the socket file");
+    assert!(!lifecycle::remove_owned_socket(&socket, inode).unwrap());
 }

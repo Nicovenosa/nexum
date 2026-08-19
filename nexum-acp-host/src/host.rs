@@ -1,12 +1,14 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Context;
+use interprocess::local_socket::{
+    tokio::{prelude::*, Listener as LocalSocketListener, Stream as LocalSocketStream},
+};
 use nexum_acp::{
     cron::{CronRuntime, ExecutePromptRunner, HeadlessPromptContextFactory},
     server::run_acp_server,
-    transport::{hub::AcpHub, types::HostPrincipal, unix::UnixTransport, AcpTransport},
+    transport::{hub::AcpHub, types::HostPrincipal, socket::SocketTransport, AcpTransport},
 };
-use tokio::net::{UnixListener, UnixStream};
 
 use crate::{config::HostConfig, lifecycle};
 
@@ -93,9 +95,9 @@ async fn futures_pending() {
     std::future::pending::<()>().await
 }
 
-async fn accept_loop(listener: UnixListener, hub: Arc<AcpHub>) -> anyhow::Result<()> {
+async fn accept_loop(listener: LocalSocketListener, hub: Arc<AcpHub>) -> anyhow::Result<()> {
     loop {
-        let (stream, _) = listener.accept().await.context("accept local ACP client")?;
+        let stream = listener.accept().await.context("accept local ACP client")?;
         let principal = match unix_peer_principal(&stream) {
             Ok(principal) => principal,
             Err(error) => {
@@ -103,20 +105,17 @@ async fn accept_loop(listener: UnixListener, hub: Arc<AcpHub>) -> anyhow::Result
                 continue;
             }
         };
-        hub.attach_with_principal(Arc::new(UnixTransport::from_stream(stream)), principal)?;
+        hub.attach_with_principal(Arc::new(SocketTransport::from_stream(stream)), principal)?;
     }
 }
 
-#[cfg(target_os = "linux")]
-fn unix_peer_principal(stream: &UnixStream) -> anyhow::Result<HostPrincipal> {
-    let peer = stream.peer_cred().context("read local peer credentials")?;
-    if peer.uid() != unsafe { libc::geteuid() } {
+fn unix_peer_principal(stream: &LocalSocketStream) -> anyhow::Result<HostPrincipal> {
+    let peer = stream.peer_creds().context("read local peer credentials")?;
+    let uid = peer
+        .euid()
+        .ok_or_else(|| anyhow::anyhow!("local ACP peer UID unavailable"))?;
+    if uid != unsafe { libc::geteuid() } {
         anyhow::bail!("local ACP peer UID mismatch");
     }
-    HostPrincipal::new(format!("unix-uid:{}", peer.uid())).map_err(Into::into)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn unix_peer_principal(_stream: &UnixStream) -> anyhow::Result<HostPrincipal> {
-    anyhow::bail!("local peer credentials are unavailable on this platform")
+    HostPrincipal::new(format!("unix-uid:{uid}")).map_err(Into::into)
 }

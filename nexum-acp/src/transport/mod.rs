@@ -10,10 +10,9 @@
 pub mod hub;
 pub mod local;
 pub mod mpsc;
+pub mod socket;
 pub mod stdio;
 pub mod types;
-#[cfg(unix)]
-pub mod unix;
 
 pub use types::LOCAL_PROTOCOL_VERSION;
 
@@ -21,7 +20,7 @@ pub use types::LOCAL_PROTOCOL_VERSION;
 mod hub_test;
 
 #[cfg(all(test, unix))]
-mod unix_test;
+mod socket_test;
 
 #[cfg(all(test, unix))]
 mod local_test;

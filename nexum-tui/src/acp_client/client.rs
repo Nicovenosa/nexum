@@ -133,7 +133,7 @@ impl AcpTuiClient {
             let msg = transport.recv().await;
             match msg {
                 Some(IncomingMessage::Notification { method, params }) => {
-                    if method == nexum_acp::transport::unix::TRANSPORT_CLOSED_METHOD {
+                    if method == nexum_acp::transport::socket::TRANSPORT_CLOSED_METHOD {
                         structured_transport_failure_seen = true;
                         let classification = params
                             .get("classification")

@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
+use interprocess::local_socket::tokio::prelude::*;
 use serde_json::json;
-use tokio::net::UnixStream;
 
 use super::{
-    hub::AcpHub, mpsc::mpsc_transport_pair, types::HostPrincipal, unix::UnixTransport, AcpTransport,
+    hub::AcpHub, mpsc::mpsc_transport_pair, types::HostPrincipal, socket::SocketTransport,
+    AcpTransport,
 };
 
 #[tokio::test]
@@ -50,14 +51,26 @@ async fn test_hub_routes_responses_and_session_events_to_owner() {
 
 #[tokio::test]
 async fn test_hub_routes_two_unix_clients_without_second_server_transport() {
-    let (client_one_stream, peer_one_stream) = UnixStream::pair().unwrap();
-    let (client_two_stream, peer_two_stream) = UnixStream::pair().unwrap();
-    let client_one = Arc::new(UnixTransport::from_stream(client_one_stream));
-    let client_two = Arc::new(UnixTransport::from_stream(client_two_stream));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hub.sock");
+    let listener = super::local::local_socket_name(&path).unwrap();
+    let listener =
+        interprocess::local_socket::ListenerOptions::new().name(listener).create_tokio().unwrap();
+    let client_one_conn = super::local::local_socket_name(&path).unwrap();
+    let client_one_stream =
+        interprocess::local_socket::tokio::Stream::connect(client_one_conn).await.unwrap();
+    let peer_one_stream = listener.accept().await.unwrap();
+    let client_two_conn = super::local::local_socket_name(&path).unwrap();
+    let client_two_stream =
+        interprocess::local_socket::tokio::Stream::connect(client_two_conn).await.unwrap();
+    let peer_two_stream = listener.accept().await.unwrap();
+
+    let client_one = Arc::new(SocketTransport::from_stream(client_one_stream));
+    let client_two = Arc::new(SocketTransport::from_stream(client_two_stream));
     let hub = Arc::new(AcpHub::new(2));
-    hub.attach(Arc::new(UnixTransport::from_stream(peer_one_stream)))
+    hub.attach(Arc::new(SocketTransport::from_stream(peer_one_stream)))
         .unwrap();
-    hub.attach(Arc::new(UnixTransport::from_stream(peer_two_stream)))
+    hub.attach(Arc::new(SocketTransport::from_stream(peer_two_stream)))
         .unwrap();
 
     let request_client = Arc::clone(&client_two);

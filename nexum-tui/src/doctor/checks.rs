@@ -1,15 +1,21 @@
 //! Checks individuales del Doctor. Cada uno devuelve uno o más `CheckResult`.
 //! Regla dura: la evidencia NUNCA incluye secretos (keys/tokens/contenido).
 
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
 use super::{CheckResult, DoctorCtx, Status};
 
+#[cfg(unix)]
 fn file_mode(p: &Path) -> Option<u32> {
+    use std::os::unix::fs::PermissionsExt as _;
     std::fs::metadata(p)
         .ok()
         .map(|m| m.permissions().mode() & 0o777)
+}
+
+#[cfg(not(unix))]
+fn file_mode(_p: &Path) -> Option<u32> {
+    None
 }
 
 // ─── RUNTIME ────────────────────────────────────────────────────────────────
@@ -403,10 +409,14 @@ pub fn security(ctx: &DoctorCtx, out: &mut Vec<CheckResult>) {
                             for e in rd.flatten() {
                                 let p = e.path();
                                 if p.extension().map(|x| x == "env").unwrap_or(false) {
-                                    let _ = std::fs::set_permissions(
-                                        &p,
-                                        std::fs::Permissions::from_mode(0o600),
-                                    );
+                                    #[cfg(unix)]
+                                    {
+                                        use std::os::unix::fs::PermissionsExt as _;
+                                        let _ = std::fs::set_permissions(
+                                            &p,
+                                            std::fs::Permissions::from_mode(0o600),
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -455,12 +465,22 @@ fn runtime_dir_for(name: &str) -> Option<std::path::PathBuf> {
             return Some(std::path::PathBuf::from(xdg).join(sub));
         }
     }
-    // UID vía std (sin dep nueva): USER como fallback aproximado del path /tmp.
-    let uid = std::fs::metadata("/proc/self")
+    let uid = effective_uid_for_runtime_path();
+    Some(std::path::PathBuf::from(format!("/tmp/nexum-{sub}-{uid}")))
+}
+
+#[cfg(unix)]
+fn effective_uid_for_runtime_path() -> u32 {
+    use std::os::unix::fs::MetadataExt as _;
+    std::fs::metadata("/proc/self")
         .ok()
         .map(|m| m.uid())
-        .unwrap_or(1000);
-    Some(std::path::PathBuf::from(format!("/tmp/nexum-{sub}-{uid}")))
+        .unwrap_or(1000)
+}
+
+#[cfg(not(unix))]
+fn effective_uid_for_runtime_path() -> u32 {
+    1000
 }
 
 // ─── PROVIDERS ──────────────────────────────────────────────────────────────

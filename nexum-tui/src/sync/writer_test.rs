@@ -352,6 +352,7 @@ mod interrupcion_real {
     /// No es una interrupción simulada con un error inyectado: es SIGKILL sobre
     /// un proceso real que está escribiendo. Es la única forma de comprobar que
     /// las guardas por Drop no son la única red — con SIGKILL no corren.
+    #[cfg(unix)]
     #[test]
     fn sigkill_durante_el_sync_no_deja_configuracion_mezclada() {
         let home = TempDir::new().unwrap();

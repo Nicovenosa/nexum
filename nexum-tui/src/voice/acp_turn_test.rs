@@ -1,4 +1,9 @@
-use std::sync::Arc;
+use std::{io, sync::Arc};
+async fn bind_server(socket: &std::path::Path) -> io::Result<LocalSocketListener> {
+    let name = nexum_acp::transport::local::local_socket_name(socket)?;
+    interprocess::local_socket::ListenerOptions::new().name(name).create_tokio()
+}
+
 
 use nexum_acp::{
     task::{
@@ -7,11 +12,12 @@ use nexum_acp::{
     },
     transport::{
         local::LocalAcpTransport, mpsc::mpsc_transport_pair, types::IncomingMessage,
-        unix::UnixTransport, AcpTransport,
+        socket::SocketTransport, AcpTransport,
     },
 };
 use serde_json::json;
-use tokio::net::UnixListener;
+use interprocess::local_socket::tokio::prelude::*;
+use interprocess::local_socket::tokio::Stream as LocalSocketStream;
 
 use super::acp_turn::{
     VoiceAcpClient, VoiceHudBridge, VoiceResultFormatter, VoiceRouteDecision, VoiceSessionState,
@@ -467,18 +473,18 @@ fn test_session_state_tiene_schema_y_solo_los_campos_permitidos() {
 async fn test_voice_y_tui_local_acp_observan_la_misma_instancia_unix() {
     let temp = tempfile::tempdir().unwrap();
     let socket = temp.path().join("acp.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = bind_server(&socket).await.unwrap();
     let server = tokio::spawn(async move {
         let mut connections = tokio::task::JoinSet::new();
         for _ in 0..2 {
-            let (stream, _) = listener.accept().await.unwrap();
+            let stream = listener.accept().await.unwrap();
             connections.spawn(async move {
-                let transport = UnixTransport::from_stream(stream);
+                let transport = SocketTransport::from_stream(stream);
                 while let Some(IncomingMessage::Request { id, method, .. }) = transport.recv().await
                 {
                     let value = match method.as_str() {
                         "health" => json!({
-                            "protocol_version": nexum_acp::transport::unix::LOCAL_PROTOCOL_VERSION,
+                            "protocol_version": nexum_acp::transport::socket::LOCAL_PROTOCOL_VERSION,
                             "runtime_available": true,
                             "health": "ready"
                         }),

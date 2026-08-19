@@ -1,18 +1,27 @@
+use std::path::Path;
 use std::time::Duration;
 
+use interprocess::local_socket::{
+    tokio::{prelude::*, Listener as LocalSocketListener},
+    ListenerOptions,
+};
 use serde_json::json;
-use tokio::net::UnixListener;
 
-use super::{local::LocalAcpTransport, unix::UnixTransport, AcpTransport};
+use super::{local::LocalAcpTransport, socket::SocketTransport, AcpTransport};
+
+async fn bind_server(socket: &Path) -> LocalSocketListener {
+    let name = super::local::local_socket_name(socket).unwrap();
+    ListenerOptions::new().name(name).create_tokio().unwrap()
+}
 
 #[tokio::test]
 async fn test_local_transport_connects_and_waits_for_ready_health() {
     let temp = tempfile::TempDir::new().unwrap();
     let socket = temp.path().join("acp.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = bind_server(&socket).await;
     let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
-        let transport = UnixTransport::from_stream(stream);
+        let stream = listener.accept().await.unwrap();
+        let transport = SocketTransport::from_stream(stream);
         if let Some(super::types::IncomingMessage::Request { id, method, .. }) =
             transport.recv().await
         {
@@ -21,7 +30,7 @@ async fn test_local_transport_connects_and_waits_for_ready_health() {
                 .send_response(
                     id,
                     Ok(json!({
-                        "protocol_version": super::unix::LOCAL_PROTOCOL_VERSION,
+                        "protocol_version": super::socket::LOCAL_PROTOCOL_VERSION,
                         "runtime_available": true,
                         "health": "ready"
                     })),
@@ -45,10 +54,10 @@ async fn test_local_transport_connects_and_waits_for_ready_health() {
 async fn test_local_transport_rejects_incompatible_or_unready_health() {
     let temp = tempfile::TempDir::new().unwrap();
     let socket = temp.path().join("acp.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = bind_server(&socket).await;
     let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
-        let transport = UnixTransport::from_stream(stream);
+        let stream = listener.accept().await.unwrap();
+        let transport = SocketTransport::from_stream(stream);
         if let Some(super::types::IncomingMessage::Request { id, .. }) = transport.recv().await {
             transport
                 .send_response(
@@ -76,10 +85,10 @@ async fn test_local_transport_rejects_incompatible_or_unready_health() {
 async fn test_local_transport_preserves_runtime_identity_response() {
     let temp = tempfile::TempDir::new().unwrap();
     let socket = temp.path().join("acp.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = bind_server(&socket).await;
     let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
-        let transport = UnixTransport::from_stream(stream);
+        let stream = listener.accept().await.unwrap();
+        let transport = SocketTransport::from_stream(stream);
         let Some(super::types::IncomingMessage::Request { id, method, .. }) =
             transport.recv().await
         else {
@@ -90,7 +99,7 @@ async fn test_local_transport_preserves_runtime_identity_response() {
             .send_response(
                 id,
                 Ok(json!({
-                    "protocol_version": super::unix::LOCAL_PROTOCOL_VERSION,
+                    "protocol_version": super::socket::LOCAL_PROTOCOL_VERSION,
                     "runtime_available": true,
                     "health": "ready"
                 })),
@@ -132,10 +141,10 @@ async fn test_local_transport_preserves_runtime_identity_response() {
 async fn test_local_transport_close_ends_the_client_stream_without_touching_host() {
     let temp = tempfile::TempDir::new().unwrap();
     let socket = temp.path().join("acp.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = bind_server(&socket).await;
     let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
-        let transport = UnixTransport::from_stream(stream);
+        let stream = listener.accept().await.unwrap();
+        let transport = SocketTransport::from_stream(stream);
         let Some(super::types::IncomingMessage::Request { id, .. }) = transport.recv().await else {
             panic!("expected health request");
         };
@@ -143,7 +152,7 @@ async fn test_local_transport_close_ends_the_client_stream_without_touching_host
             .send_response(
                 id,
                 Ok(json!({
-                    "protocol_version": super::unix::LOCAL_PROTOCOL_VERSION,
+                    "protocol_version": super::socket::LOCAL_PROTOCOL_VERSION,
                     "runtime_available": true,
                     "health": "ready"
                 })),
@@ -156,7 +165,7 @@ async fn test_local_transport_close_ends_the_client_stream_without_touching_host
         else {
             panic!("peer close must be reported before the stream ends");
         };
-        assert_eq!(method, super::unix::TRANSPORT_CLOSED_METHOD);
+        assert_eq!(method, super::socket::TRANSPORT_CLOSED_METHOD);
         assert_eq!(params["classification"], "SOCKET_EOF");
         assert_eq!(params["reason_code"], "ACP_PEER_CLOSED");
         assert!(transport.recv().await.is_none());

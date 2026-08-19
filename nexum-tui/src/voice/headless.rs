@@ -30,8 +30,11 @@ const PID_FILE: &str = "voice.pid";
 /// USUARIO, así que el aislamiento va por UID, no por proceso.
 pub(super) fn runtime_dir() -> PathBuf {
     crate::hormiguero::bridge::runtime_dir().unwrap_or_else(|| {
+        #[cfg(unix)]
         // SAFETY: getuid() no falla y no tiene efectos.
         let uid = unsafe { libc::getuid() };
+        #[cfg(not(unix))]
+        let uid = 0;
         #[allow(clippy::disallowed_methods)] // fallback de último recurso, aislado por UID
         let dir = std::env::temp_dir().join(format!("nexum-voice-{uid}"));
         let _ = std::fs::create_dir_all(&dir);
@@ -46,11 +49,25 @@ fn read_live_pid(dir: &std::path::Path) -> Option<i32> {
     (cmdline.contains("voice")).then_some(pid)
 }
 
+#[cfg(unix)]
 unsafe fn send_sig(pid: i32, sig: i32) {
     unsafe extern "C" {
         fn kill(pid: i32, sig: i32) -> i32;
     }
     unsafe { kill(pid, sig) };
+}
+
+#[cfg(not(unix))]
+unsafe fn send_sig(_pid: i32, _sig: i32) {}
+
+#[cfg(not(unix))]
+struct NoSignals;
+
+#[cfg(not(unix))]
+impl NoSignals {
+    fn recv(&mut self) -> futures_util::future::Pending<()> {
+        futures_util::future::pending()
+    }
 }
 
 // ── status / engines ─────────────────────────────────────────────────────
@@ -468,9 +485,16 @@ async fn listen_inner(dir: &std::path::Path) -> i32 {
 
     // Loop VAD: corta solo por silencio tras voz; señales siguen andando
     // (SIGUSR1 = cortar ya; SIGTERM/Ctrl+C = cancelar; max = timeout duro).
-    use tokio::signal::unix::{signal, SignalKind};
-    let mut usr1 = signal(SignalKind::user_defined1()).expect("signal");
-    let mut term = signal(SignalKind::terminate()).expect("signal");
+    #[cfg(unix)]
+    let (mut usr1, mut term) = {
+        use tokio::signal::unix::{signal, SignalKind};
+        (
+            signal(SignalKind::user_defined1()).expect("signal"),
+            signal(SignalKind::terminate()).expect("signal"),
+        )
+    };
+    #[cfg(not(unix))]
+    let (mut usr1, mut term) = (NoSignals, NoSignals);
     let cfg = VadConfig::from_env();
     let max_secs = cfg.max_record_secs;
     let mut vad = RmsVad::new(cfg);

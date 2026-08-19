@@ -137,7 +137,7 @@ scripts/nexum-install --prefix "$HOME/.local" --rollback 0.1.4-rc.3
 
 An installer exists at `scripts/nexum-install.ps1` (installs `lib/nexum/<version>` with a `current` junction, `.cmd` shims and user PATH entry; `scripts/nexum-uninstall.ps1` removes it).
 
-**Platform status:** build is configured in CI; the installer has not yet been validated on a real Windows host. Windows is **NOT SUPPORTED** until validated.
+**Platform status:** the workspace builds, tests and lints green on Windows in CI (`ci.yml`, windows-latest). The local ACP transport uses `interprocess` Unix-domain-style sockets on Windows (namespaced names) instead of the Unix socket path; the `nexum-acp-host` local host binary remains Unix-only by design. The installer has not yet been validated on a real Windows host.
 
 ### macOS
 
@@ -282,7 +282,7 @@ The CI pipeline (`ci.yml`) runs lint (Ruff + mypy) and the full test suite on Li
 - **WebFetch/WebSearch:** HTTP requests go through the Tavily proxy. The SSRF guard does not directly cover these tools.
 - **Internal APIs:** middleware and ACP APIs may change between versions.
 - **Testing:** a few tests may be environment-sensitive (git repo state, permissions, terminal).
-- **Windows/macOS:** installers/builds are not yet validated on those platforms.
+- **Windows:** the local ACP host binary (`nexum-acp-host`) and the voice-capture / sidecar tooling (pw-record/arecord, Python sidecars) are Unix-only; on Windows the agent runs against remote ACP hosts. The installer has not yet been validated on a real Windows host.
 
 ---
 

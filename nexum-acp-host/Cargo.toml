@@ -20,6 +20,7 @@ dirs-next.workspace = true
 clap.workspace = true
 chrono.workspace = true
 libc = "0.2"
+interprocess = { version = "2.4.3", features = ["tokio"] }
 serde_json.workspace = true
 
 [dev-dependencies]

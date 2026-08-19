@@ -1,4 +1,5 @@
-//! Transporte ACP local sobre Unix domain sockets.
+//! Transporte ACP local sobre sockets: Unix domain sockets en Unix y named
+//! pipes en Windows, a través de la abstracción `local_socket` de interprocess.
 //!
 //! El socket sólo transporta mensajes ACP serializados como JSON-RPC. El prefijo
 //! binario agrega versión, correlación y límite de tamaño sin crear un protocolo
@@ -15,13 +16,10 @@ use std::{
 };
 
 use async_trait::async_trait;
+use interprocess::local_socket::tokio::Stream as LocalSocketStream;
 use serde_json::{json, Value};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{
-        unix::{OwnedReadHalf, OwnedWriteHalf},
-        UnixStream,
-    },
     sync::{mpsc, oneshot, Mutex},
     time::timeout,
 };
@@ -147,12 +145,13 @@ impl FrameCodec {
 
 type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, AcpError>>>>>;
 
-/// Transporte ACP sobre un único stream Unix autenticado por el host.
+/// Transporte ACP sobre un único stream local autenticado por el host.
 ///
 /// Cada dirección tiene una cola acotada: un cliente lento recibe un error en
 /// lugar de hacer crecer memoria sin límite.
-pub struct UnixTransport {
-    writer: Mutex<Option<OwnedWriteHalf>>,
+pub struct SocketTransport {
+    writer: Mutex<Option<Arc<LocalSocketStream>>>,
+    reader: Mutex<Option<tokio::task::JoinHandle<()>>>,
     incoming: Mutex<mpsc::Receiver<IncomingMessage>>,
     pending: PendingMap,
     next_id: AtomicI64,
@@ -160,33 +159,34 @@ pub struct UnixTransport {
     shutdown: CancellationToken,
 }
 
-impl Drop for UnixTransport {
+impl Drop for SocketTransport {
     fn drop(&mut self) {
         // Header reads intentionally have no idle deadline. Cancel the reader;
-        // synchronously dropping the writer half makes peer shutdown observable
-        // even when the current-thread runtime cannot schedule another task.
+        // dropping the shared stream makes the peer shutdown observable even
+        // when the current-thread runtime cannot schedule another task.
         self.shutdown.cancel();
         self.writer.get_mut().take();
     }
 }
 
-impl UnixTransport {
-    pub fn from_stream(stream: UnixStream) -> Self {
-        let (reader, writer) = stream.into_split();
+impl SocketTransport {
+    pub fn from_stream(stream: LocalSocketStream) -> Self {
+        let stream = Arc::new(stream);
         let (incoming_tx, incoming_rx) = mpsc::channel(INCOMING_QUEUE);
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let frame_id = Arc::new(AtomicU64::new(1));
         let shutdown = CancellationToken::new();
 
-        tokio::spawn(read_loop(
-            reader,
+        let reader = tokio::spawn(read_loop(
+            stream.clone(),
             incoming_tx,
             pending.clone(),
             shutdown.clone(),
         ));
 
         Self {
-            writer: Mutex::new(Some(writer)),
+            writer: Mutex::new(Some(stream)),
+            reader: Mutex::new(Some(reader)),
             incoming: Mutex::new(incoming_rx),
             pending,
             next_id: AtomicI64::new(1),
@@ -199,10 +199,12 @@ impl UnixTransport {
         let frame = WireFrame::request(self.next_frame_id.fetch_add(1, Ordering::Relaxed), payload);
         let encoded = FrameCodec::encode(&frame)
             .map_err(|error| AcpError::new(-32092, format!("ACP protocol failure: {error}")))?;
-        let mut writer = self.writer.lock().await;
-        let writer = writer.as_mut().ok_or_else(|| {
+        let guard = self.writer.lock().await;
+        let writer = guard.as_ref().ok_or_else(|| {
             AcpError::new(-32091, "ACP transport failure: local transport closed")
         })?;
+        let socket = &**writer;
+        let mut writer = socket;
         match timeout(WRITE_TIMEOUT, writer.write_all(&encoded)).await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => Err(AcpError::new(
@@ -220,7 +222,9 @@ impl UnixTransport {
     }
 }
 
-async fn read_frame(reader: &mut OwnedReadHalf) -> Result<WireFrame, FrameError> {
+async fn read_frame<R: AsyncReadExt + Unpin>(
+    reader: &mut R,
+) -> Result<WireFrame, FrameError> {
     let mut header = [0_u8; HEADER_BYTES];
     // An idle ACP connection is healthy. Only a partially received frame has a
     // deadline; waiting for the first header byte must not manufacture EOF.
@@ -276,15 +280,16 @@ fn structured_transport_failure(error: &FrameError) -> IncomingMessage {
 }
 
 async fn read_loop(
-    mut reader: OwnedReadHalf,
+    reader: Arc<LocalSocketStream>,
     incoming: mpsc::Sender<IncomingMessage>,
     pending: PendingMap,
     shutdown: CancellationToken,
 ) {
     loop {
+        let mut socket = &*reader;
         let frame = tokio::select! {
             _ = shutdown.cancelled() => break,
-            frame = read_frame(&mut reader) => match frame {
+            frame = read_frame(&mut socket) => match frame {
                 Ok(frame) => frame,
                 Err(error) => {
                     tracing::debug!(error = %error, "local ACP read loop closed");
@@ -363,7 +368,7 @@ fn decode_acp_message(payload: Value) -> Option<IncomingMessage> {
 }
 
 #[async_trait]
-impl AcpTransport for UnixTransport {
+impl AcpTransport for SocketTransport {
     async fn send_request(&self, method: &str, params: Value) -> Result<Value, AcpError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
@@ -404,6 +409,12 @@ impl AcpTransport for UnixTransport {
     async fn close(&self) -> Result<(), AcpError> {
         self.shutdown.cancel();
         self.writer.lock().await.take();
+        // Await the reader so the shared stream (and its file descriptor)
+        // drops now: peer shutdown must be observable even when the caller
+        // blocks on std child.wait() right after, without a poll to schedule.
+        if let Some(reader) = self.reader.lock().await.take() {
+            let _ = timeout(Duration::from_secs(2), reader).await;
+        }
         Ok(())
     }
 }

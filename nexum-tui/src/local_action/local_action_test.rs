@@ -220,6 +220,7 @@ fn test_nombres_con_espacios_y_acentos() {
     std::fs::remove_dir_all(&w).ok();
 }
 
+#[cfg(unix)]
 #[test]
 fn test_readonly_filesystem_error_honesto() {
     let w = mk_ws();
@@ -258,6 +259,7 @@ fn test_nombre_enorme_rechazado() {
     std::fs::remove_dir_all(&w).ok();
 }
 
+#[cfg(unix)]
 #[test]
 fn test_symlink_reemplazado_no_escapa() {
     // Base es un symlink a un dir DENTRO del temp; el target debe quedar bajo el

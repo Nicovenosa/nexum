@@ -6,7 +6,10 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-use tokio::net::{UnixListener, UnixStream};
+use interprocess::local_socket::{
+    tokio::{prelude::*, Listener as LocalSocketListener, Stream as LocalSocketStream},
+    ListenerOptions,
+};
 
 pub fn default_socket_path() -> Result<PathBuf, nexum_acp::transport::local::RuntimeDirectoryError>
 {
@@ -42,14 +45,15 @@ pub fn cron_store_path() -> PathBuf {
 }
 
 
-pub async fn bind(path: &PathBuf) -> anyhow::Result<UnixListener> {
+pub async fn bind(path: &PathBuf) -> anyhow::Result<LocalSocketListener> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::other("socket has no parent"))?;
     nexum_acp::transport::local::ensure_private_runtime_directory(parent)?;
 
     if path.exists() {
-        match UnixStream::connect(path).await {
+        let probe = nexum_acp::transport::local::local_socket_name(path)?;
+        match LocalSocketStream::connect(probe).await {
             Ok(_) => {
                 return Err(
                     io::Error::new(io::ErrorKind::AddrInUse, "ACP host already running").into(),
@@ -62,7 +66,8 @@ pub async fn bind(path: &PathBuf) -> anyhow::Result<UnixListener> {
             Err(error) => return Err(error.into()),
         }
     }
-    let listener = UnixListener::bind(path)?;
+    let name = nexum_acp::transport::local::local_socket_name(path)?;
+    let listener = ListenerOptions::new().name(name).create_tokio()?;
     #[cfg(unix)]
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     Ok(listener)

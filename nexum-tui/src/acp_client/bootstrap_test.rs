@@ -9,9 +9,10 @@ use std::{
     time::Duration,
 };
 
-use nexum_acp::transport::{types::IncomingMessage, unix::UnixTransport, AcpTransport};
+use nexum_acp::transport::{types::IncomingMessage, socket::SocketTransport, AcpTransport};
 use serde_json::json;
-use tokio::net::UnixListener;
+use interprocess::local_socket::tokio::prelude::*;
+use interprocess::local_socket::tokio::Stream as LocalSocketStream;
 
 use super::bootstrap::{
     connect_local, connect_local_at_with_guard, ensure_auto_host, host_binary_path_from_executable,
@@ -43,26 +44,47 @@ fn with_runtime_environment<T>(runtime: &Path, guard: &Path, action: impl FnOnce
     result
 }
 
+#[cfg(not(unix))]
+#[derive(Default)]
+struct NeverSignal;
+
+#[cfg(not(unix))]
+impl NeverSignal {
+    fn recv(&mut self) -> futures_util::future::Pending<()> {
+        futures_util::future::pending()
+    }
+}
+
 fn secure_directory(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+async fn bind_server(socket: &std::path::Path) -> io::Result<LocalSocketListener> {
+    let name = nexum_acp::transport::local::local_socket_name(socket)?;
+    interprocess::local_socket::ListenerOptions::new().name(name).create_tokio()
 }
 
 fn current_test_process_guard() -> HostIdentityGuard {
     HostIdentityGuard::for_expected_host(&std::env::current_exe().unwrap()).unwrap()
 }
 
-async fn serve_health(listener: UnixListener, connections: usize) {
+async fn serve_health(listener: LocalSocketListener, connections: usize) {
     for _ in 0..connections {
-        let (stream, _) = listener.accept().await.unwrap();
-        let transport = UnixTransport::from_stream(stream);
+        let stream = listener.accept().await.unwrap();
+        let transport = SocketTransport::from_stream(stream);
         if let Some(IncomingMessage::Request { id, method, .. }) = transport.recv().await {
             assert_eq!(method, "health");
             transport
                 .send_response(
                     id,
                     Ok(json!({
-                        "protocol_version": nexum_acp::transport::unix::LOCAL_PROTOCOL_VERSION,
+                        "protocol_version": nexum_acp::transport::socket::LOCAL_PROTOCOL_VERSION,
                         "runtime_available": true,
                         "health": "ready"
                     })),
@@ -147,8 +169,11 @@ fn invalid_runtime_does_not_unlink_socket() {
     secure_directory(guard.path());
     let runtime = guard.path().join("unsafe-runtime");
     std::fs::create_dir(&runtime).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o755)).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let error = with_runtime_environment(&runtime, guard.path(), || {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -256,6 +281,7 @@ fn stale_host_is_rejected() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn test_current_symlink_is_canonicalized_to_the_expected_slot() {
     use std::os::unix::fs::symlink;
@@ -274,6 +300,7 @@ fn test_current_symlink_is_canonicalized_to_the_expected_slot() {
     assert!(guard.verify_observed_executable_for_test(9, &host).is_ok());
 }
 
+#[cfg(unix)]
 #[test]
 fn test_expected_host_symlink_cannot_escape_the_expected_slot() {
     use std::os::unix::fs::symlink;
@@ -320,7 +347,7 @@ struct FakeIdentitySource {
 }
 
 impl HostIdentitySource for FakeIdentitySource {
-    fn peer_pid(&self, _stream: &tokio::net::UnixStream) -> io::Result<Option<u32>> {
+    fn peer_pid(&self, _stream: &LocalSocketStream) -> io::Result<Option<u32>> {
         self.pid
             .as_ref()
             .map(|pid| *pid)
@@ -359,11 +386,27 @@ fn guard_fixture() -> (tempfile::TempDir, HostIdentityGuard) {
     let guard = HostIdentityGuard::for_expected_host(&host).unwrap();
     (temp, guard)
 }
+async fn test_stream_pair() -> (LocalSocketStream, LocalSocketStream) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("guard.sock");
+    let name = nexum_acp::transport::local::local_socket_name(&path).unwrap();
+    let listener = interprocess::local_socket::ListenerOptions::new()
+        .name(name)
+        .create_tokio()
+        .unwrap();
+    let client_task = tokio::spawn(async move {
+        let name = nexum_acp::transport::local::local_socket_name(&path).unwrap();
+        LocalSocketStream::connect(name).await.unwrap()
+    });
+    let server = listener.accept().await.unwrap();
+    (client_task.await.unwrap(), server)
+}
+
 
 #[tokio::test]
 async fn test_peer_pid_unavailable_fails_closed() {
     let (_temp, guard) = guard_fixture();
-    let (stream, _peer) = tokio::net::UnixStream::pair().unwrap();
+    let (stream, _peer) = test_stream_pair().await;
     let source = FakeIdentitySource {
         pid: Ok(None),
         executable: Err(io::Error::new(io::ErrorKind::NotFound, "unused")),
@@ -384,7 +427,7 @@ async fn test_peer_pid_unavailable_fails_closed() {
 #[tokio::test]
 async fn test_proc_executable_unresolvable_fails_closed() {
     let (_temp, guard) = guard_fixture();
-    let (stream, _peer) = tokio::net::UnixStream::pair().unwrap();
+    let (stream, _peer) = test_stream_pair().await;
     let source = FakeIdentitySource {
         pid: Ok(Some(44)),
         executable: Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied")),
@@ -405,7 +448,7 @@ async fn test_proc_executable_unresolvable_fails_closed() {
 #[tokio::test]
 async fn test_peer_exit_during_verification_fails_closed() {
     let (_temp, guard) = guard_fixture();
-    let (stream, _peer) = tokio::net::UnixStream::pair().unwrap();
+    let (stream, _peer) = test_stream_pair().await;
     let source = FakeIdentitySource {
         pid: Ok(Some(45)),
         executable: Err(io::Error::new(io::ErrorKind::NotFound, "gone")),
@@ -423,7 +466,7 @@ async fn test_peer_exit_during_verification_fails_closed() {
 #[tokio::test]
 async fn test_invalid_observed_path_fails_closed() {
     let (_temp, guard) = guard_fixture();
-    let (stream, _peer) = tokio::net::UnixStream::pair().unwrap();
+    let (stream, _peer) = test_stream_pair().await;
     let source = FakeIdentitySource {
         pid: Ok(Some(46)),
         executable: Ok(PathBuf::from("/proc/46/exe")),
@@ -524,7 +567,7 @@ async fn test_local_requires_a_visible_ready_host() {
 async fn acp_host_healthcheck_passes() {
     let temp = tempfile::TempDir::new().unwrap();
     let socket = temp.path().join("acp.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = bind_server(&socket).await.unwrap();
     tokio::spawn(serve_health(listener, 1));
     let guard = current_test_process_guard();
 
@@ -541,10 +584,10 @@ async fn acp_host_healthcheck_passes() {
 async fn test_auto_rejects_a_visible_protocol_mismatch_without_spawning() {
     let temp = tempfile::TempDir::new().unwrap();
     let socket = temp.path().join("acp.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = bind_server(&socket).await.unwrap();
     tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
-        let transport = UnixTransport::from_stream(stream);
+        let stream = listener.accept().await.unwrap();
+        let transport = SocketTransport::from_stream(stream);
         let Some(IncomingMessage::Request { id, method, .. }) = transport.recv().await else {
             panic!("expected health request");
         };
@@ -580,7 +623,7 @@ async fn test_auto_rejects_a_visible_protocol_mismatch_without_spawning() {
 async fn test_auto_recovers_stale_socket_before_one_spawn() {
     let temp = tempfile::TempDir::new().unwrap();
     let socket = temp.path().join("acp.sock");
-    let stale = UnixListener::bind(&socket).unwrap();
+    let stale = bind_server(&socket).await.unwrap();
     drop(stale);
     let socket_for_host = socket.clone();
     let spawns = Arc::new(AtomicUsize::new(0));
@@ -589,8 +632,10 @@ async fn test_auto_recovers_stale_socket_before_one_spawn() {
 
     let transport = ensure_auto_host(&socket, Duration::from_secs(1), &guard, move || {
         spawn_count.fetch_add(1, Ordering::SeqCst);
-        let listener = UnixListener::bind(&socket_for_host)?;
-        tokio::spawn(serve_health(listener, 1));
+        tokio::spawn(async move {
+            let listener = bind_server(&socket_for_host).await.unwrap();
+            serve_health(listener, 1).await;
+        });
         Ok(())
     })
     .await
@@ -631,14 +676,18 @@ async fn test_auto_concurrent_callers_spawn_exactly_one_mock_host() {
     let (first, second) = tokio::join!(
         ensure_auto_host(&socket, Duration::from_secs(1), &guard, move || {
             first_spawns.fetch_add(1, Ordering::SeqCst);
-            let listener = UnixListener::bind(&first_socket)?;
-            tokio::spawn(serve_health(listener, 2));
+            tokio::spawn(async move {
+                let listener = bind_server(&first_socket).await.unwrap();
+                serve_health(listener, 2).await;
+            });
             Ok(())
         }),
         ensure_auto_host(&socket, Duration::from_secs(1), &guard, move || {
             second_spawns.fetch_add(1, Ordering::SeqCst);
-            let listener = UnixListener::bind(&second_socket)?;
-            tokio::spawn(serve_health(listener, 2));
+            tokio::spawn(async move {
+                let listener = bind_server(&second_socket).await.unwrap();
+                serve_health(listener, 2).await;
+            });
             Ok(())
         })
     );
@@ -652,7 +701,7 @@ async fn test_auto_concurrent_callers_spawn_exactly_one_mock_host() {
 async fn test_two_local_clients_share_host_identity_capabilities_provider_and_model() {
     let temp = tempfile::TempDir::new().unwrap();
     let socket = temp.path().join("acp.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = bind_server(&socket).await.unwrap();
     let server = tokio::spawn(serve_shared_host(listener, 2));
     let guard = current_test_process_guard();
 
@@ -701,7 +750,7 @@ async fn test_two_local_clients_share_host_identity_capabilities_provider_and_mo
 async fn test_closing_a_tui_local_client_does_not_stop_the_host_listener() {
     let temp = tempfile::TempDir::new().unwrap();
     let socket = temp.path().join("acp.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = bind_server(&socket).await.unwrap();
     let server = tokio::spawn(serve_health(listener, 2));
     let guard = current_test_process_guard();
 
@@ -727,12 +776,12 @@ async fn assert_slot_mismatch_sends_zero_rpc() {
     std::fs::write(&expected_host, "not-the-running-test-process").unwrap();
     let guard = HostIdentityGuard::for_expected_host(&expected_host).unwrap();
     let socket = temp.path().join("acp.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = bind_server(&socket).await.unwrap();
     let requests = Arc::new(AtomicUsize::new(0));
     let server_requests = requests.clone();
     let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
-        let transport = UnixTransport::from_stream(stream);
+        let stream = listener.accept().await.unwrap();
+        let transport = SocketTransport::from_stream(stream);
         while let Some(IncomingMessage::Request { .. }) = transport.recv().await {
             server_requests.fetch_add(1, Ordering::SeqCst);
         }
@@ -761,17 +810,17 @@ async fn test_slot_mismatch_prevents_prompt_rpc() {
 async fn test_verified_connection_is_the_connection_used_for_acp() {
     let temp = tempfile::TempDir::new().unwrap();
     let socket = temp.path().join("acp.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener = bind_server(&socket).await.unwrap();
     let connections = Arc::new(AtomicUsize::new(0));
     let server_connections = connections.clone();
     let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
+        let stream = listener.accept().await.unwrap();
         server_connections.fetch_add(1, Ordering::SeqCst);
-        let transport = UnixTransport::from_stream(stream);
+        let transport = SocketTransport::from_stream(stream);
         while let Some(IncomingMessage::Request { id, method, .. }) = transport.recv().await {
             let value = match method.as_str() {
                 "health" => json!({
-                    "protocol_version": nexum_acp::transport::unix::LOCAL_PROTOCOL_VERSION,
+                    "protocol_version": nexum_acp::transport::socket::LOCAL_PROTOCOL_VERSION,
                     "runtime_available": true,
                     "health": "ready"
                 }),
@@ -944,24 +993,27 @@ fn host_identity_slot_host_helper() {
         .build()
         .unwrap();
     runtime.block_on(async {
+        #[cfg(unix)]
         let mut term =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
+        #[cfg(not(unix))]
+        let mut term = NeverSignal;
+        let listener = bind_server(&socket).await.unwrap();
         let mut count = 0_usize;
         let durable = std::env::var("NEXUM_HOST_IDENTITY_TEST_DURABLE").as_deref() == Ok("1");
         loop {
             let stream = if durable {
                 tokio::select! {
-                    accepted = listener.accept() => Some(accepted.unwrap().0),
+                    accepted = listener.accept() => Some(accepted.unwrap()),
                     _ = term.recv() => None,
                 }
             } else {
-                Some(listener.accept().await.unwrap().0)
+                Some(listener.accept().await.unwrap())
             };
             let Some(stream) = stream else {
                 break;
             };
-            let transport = UnixTransport::from_stream(stream);
+            let transport = SocketTransport::from_stream(stream);
             while let Some(message) = transport.recv().await {
                 let IncomingMessage::Request { id, method, .. } = message else {
                     break;
@@ -969,7 +1021,7 @@ fn host_identity_slot_host_helper() {
                 count += 1;
                 let response = match method.as_str() {
                     "health" => json!({
-                        "protocol_version": nexum_acp::transport::unix::LOCAL_PROTOCOL_VERSION,
+                        "protocol_version": nexum_acp::transport::socket::LOCAL_PROTOCOL_VERSION,
                         "runtime_available": true,
                         "health": "ready"
                     }),
@@ -1108,16 +1160,16 @@ async fn test_temp_slot_harness_rejects_slot_b_before_any_rpc() {
     assert_eq!(std::fs::read_to_string(count).unwrap(), "0");
 }
 
-async fn serve_shared_host(listener: UnixListener, connections: usize) {
+async fn serve_shared_host(listener: LocalSocketListener, connections: usize) {
     let mut tasks = tokio::task::JoinSet::new();
     for _ in 0..connections {
-        let (stream, _) = listener.accept().await.unwrap();
+        let stream = listener.accept().await.unwrap();
         tasks.spawn(async move {
-            let transport = UnixTransport::from_stream(stream);
+            let transport = SocketTransport::from_stream(stream);
             while let Some(IncomingMessage::Request { id, method, .. }) = transport.recv().await {
                 let response = match method.as_str() {
                     "health" => json!({
-                        "protocol_version": nexum_acp::transport::unix::LOCAL_PROTOCOL_VERSION,
+                        "protocol_version": nexum_acp::transport::socket::LOCAL_PROTOCOL_VERSION,
                         "runtime_available": true,
                         "health": "ready"
                     }),

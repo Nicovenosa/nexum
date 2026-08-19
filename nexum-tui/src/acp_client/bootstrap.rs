@@ -2,16 +2,16 @@ use std::{
     fmt,
     fs::{self, OpenOptions},
     io,
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     process::Stdio,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
+use interprocess::local_socket::traits::StreamCommon as _;
 use nexum_acp::transport::local::{
     default_local_socket_path, ensure_private_runtime_directory, LocalAcpTransport,
-    LocalTransportError, RuntimeDirectoryError,
+    LocalSocketStream, LocalTransportError, RuntimeDirectoryError,
 };
 use nexum_acp::transport::{
     types::{AcpError, IncomingMessage, RequestId},
@@ -118,7 +118,7 @@ impl fmt::Display for HostIdentityError {
 impl std::error::Error for HostIdentityError {}
 
 pub(crate) trait HostIdentitySource {
-    fn peer_pid(&self, stream: &tokio::net::UnixStream) -> io::Result<Option<u32>>;
+    fn peer_pid(&self, stream: &LocalSocketStream) -> io::Result<Option<u32>>;
     fn executable_for_pid(&self, pid: u32) -> io::Result<PathBuf>;
     fn peer_exists(&self, pid: u32) -> bool;
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf>;
@@ -127,23 +127,15 @@ pub(crate) trait HostIdentitySource {
 struct LinuxHostIdentitySource;
 
 impl HostIdentitySource for LinuxHostIdentitySource {
-    fn peer_pid(&self, stream: &tokio::net::UnixStream) -> io::Result<Option<u32>> {
-        #[cfg(target_os = "linux")]
-        {
-            stream
-                .peer_cred()?
-                .pid()
-                .map(|pid| {
-                    u32::try_from(pid)
-                        .map_err(|_| io::Error::other("peer PID is outside the valid range"))
-                })
-                .transpose()
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            let _ = stream;
-            Ok(None)
-        }
+    fn peer_pid(&self, stream: &LocalSocketStream) -> io::Result<Option<u32>> {
+        stream
+            .peer_creds()?
+            .pid()
+            .map(|pid| {
+                u32::try_from(pid)
+                    .map_err(|_| io::Error::other("peer PID is outside the valid range"))
+            })
+            .transpose()
     }
 
     fn executable_for_pid(&self, pid: u32) -> io::Result<PathBuf> {
@@ -205,7 +197,7 @@ impl HostIdentityGuard {
     fn verify(
         &self,
         socket_path: &Path,
-        stream: &tokio::net::UnixStream,
+        stream: &LocalSocketStream,
     ) -> Result<(), HostIdentityError> {
         self.verify_with_source(socket_path, stream, &LinuxHostIdentitySource)
     }
@@ -213,7 +205,7 @@ impl HostIdentityGuard {
     pub(crate) fn verify_with_source(
         &self,
         socket_path: &Path,
-        stream: &tokio::net::UnixStream,
+        stream: &LocalSocketStream,
         source: &dyn HostIdentitySource,
     ) -> Result<(), HostIdentityError> {
         let peer_pid = match source.peer_pid(stream) {
@@ -528,16 +520,26 @@ fn spawn_local_host_at(host: &Path) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("XDG_STATE_HOME/HOME unavailable for ACP diagnostics"))?
         .join("nexum");
     fs::create_dir_all(&state_root)?;
-    fs::set_permissions(
-        &state_root,
-        <fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o700),
-    )?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&state_root, fs::Permissions::from_mode(0o700))?;
+    }
     let stderr_path = state_root.join("acp-host.stderr.log");
     let diagnostic_path = state_root.join("acp-host-exit.json");
+    #[cfg(unix)]
+    let stderr = {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(&stderr_path)?
+    };
+    #[cfg(not(unix))]
     let stderr = OpenOptions::new()
         .create(true)
         .append(true)
-        .mode(0o600)
         .open(&stderr_path)?;
 
     let mut cmd = std::process::Command::new(host);
@@ -721,16 +723,25 @@ async fn recover_rejected_stale_host(
     if current_observed != observed {
         anyhow::bail!("HOST_IDENTITY_AMBIGUOUS: peer executable changed before shutdown");
     }
-    let owner_uid = fs::metadata(format!("/proc/{pid}"))?.uid();
-    if owner_uid != unsafe { libc::geteuid() } {
-        anyhow::bail!("PERMISSION_ERROR: rejected ACP host belongs to another uid");
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        anyhow::bail!("PERMISSION_ERROR: rejected ACP host recovery is unsupported on this platform");
     }
-    let signal_result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-    if signal_result != 0 {
-        anyhow::bail!(
-            "failed to terminate rejected ACP host gracefully: {}",
-            io::Error::last_os_error()
-        );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let owner_uid = fs::metadata(format!("/proc/{pid}"))?.uid();
+        if owner_uid != unsafe { libc::geteuid() } {
+            anyhow::bail!("PERMISSION_ERROR: rejected ACP host belongs to another uid");
+        }
+        let signal_result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+        if signal_result != 0 {
+            anyhow::bail!(
+                "failed to terminate rejected ACP host gracefully: {}",
+                io::Error::last_os_error()
+            );
+        }
     }
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -743,19 +754,23 @@ async fn recover_rejected_stale_host(
 
     // The old host owns cleanup. Removal here is only allowed after its exact
     // PID is gone and the path is demonstrably refused (dead-owner residue).
-    if socket.exists() {
-        match std::os::unix::net::UnixStream::connect(socket) {
-            Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
-                fs::remove_file(socket)?;
+    #[cfg(unix)]
+    {
+        if socket.exists() {
+            match std::os::unix::net::UnixStream::connect(socket) {
+                Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
+                    fs::remove_file(socket)?;
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Ok(_) => anyhow::bail!("a new ACP host rebound the socket during recovery"),
+                Err(error) => return Err(error.into()),
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Ok(_) => anyhow::bail!("a new ACP host rebound the socket during recovery"),
-            Err(error) => return Err(error.into()),
         }
     }
     Ok(())
 }
 
+#[cfg(unix)]
 fn process_is_running(pid: u32) -> bool {
     let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
         return false;
@@ -765,6 +780,12 @@ fn process_is_running(pid: u32) -> bool {
     stat.rsplit_once(')')
         .and_then(|(_, tail)| tail.split_whitespace().next())
         != Some("Z")
+}
+
+#[cfg(not(unix))]
+fn process_is_running(_pid: u32) -> bool {
+    // No /proc outside Unix: assume the peer is gone so recovery does not spin.
+    false
 }
 
 async fn connect_ready_guarded(
@@ -780,6 +801,7 @@ async fn connect_ready_guarded(
     .await
 }
 
+#[cfg(unix)]
 fn prepare_unavailable_socket(socket: &Path) -> io::Result<bool> {
     match std::os::unix::net::UnixStream::connect(socket) {
         Ok(_) => Ok(false),
@@ -790,4 +812,10 @@ fn prepare_unavailable_socket(socket: &Path) -> io::Result<bool> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
         Err(error) => Err(error),
     }
+}
+
+#[cfg(not(unix))]
+fn prepare_unavailable_socket(_socket: &Path) -> io::Result<bool> {
+    // No legacy Unix socket residue outside Unix: nothing to clean.
+    Ok(true)
 }
