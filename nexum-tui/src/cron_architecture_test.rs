@@ -1,3 +1,4 @@
+#[cfg(unix)]
 #[test]
 fn test_cron_runtime_is_owned_only_by_the_host() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -145,9 +145,11 @@ pub fn save_to_path(path: &Path, profile: &VoiceProfile) -> Result<(), String> {
         file.write_all(&json).map_err(|error| error.to_string())?;
         file.sync_all().map_err(|error| error.to_string())?;
         std::fs::rename(&temp, path).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
         std::fs::File::open(parent)
             .and_then(|directory| directory.sync_all())
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        Ok(())
     })();
     if write_result.is_err() {
         let _ = std::fs::remove_file(&temp);

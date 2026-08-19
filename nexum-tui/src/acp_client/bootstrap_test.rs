@@ -163,6 +163,7 @@ fn invalid_runtime_does_not_signal_pid() {
     assert!(error.to_string().contains("RUNTIME_DIRECTORY_NOT_ABSOLUTE"));
 }
 
+#[cfg(unix)]
 #[test]
 fn invalid_runtime_does_not_unlink_socket() {
     let guard = tempfile::tempdir().unwrap();
