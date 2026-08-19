@@ -94,7 +94,7 @@ impl fmt::Display for HostIdentityDiagnostic {
 
 #[derive(Debug)]
 pub(crate) struct HostIdentityError {
-    diagnostic: HostIdentityDiagnostic,
+    diagnostic: Box<HostIdentityDiagnostic>,
 }
 
 impl HostIdentityError {
@@ -329,7 +329,9 @@ impl HostIdentityGuard {
             reason_code = %diagnostic.reason_code,
             "ACP host identity guard"
         );
-        HostIdentityError { diagnostic }
+        HostIdentityError {
+            diagnostic: Box::new(diagnostic),
+        }
     }
 
     fn take_rejection(&self) -> Option<HostIdentityDiagnostic> {
@@ -546,6 +548,9 @@ fn spawn_local_host_at(host: &Path) -> anyhow::Result<()> {
         .arg(&diagnostic_path);
     // The auto-started host is owned by this TUI. PR_SET_PDEATHSIG closes it
     // gracefully if the parent exits, preventing a reparented stale singleton.
+    // Linux-only: macOS and Windows do not provide prctl(2); there the child
+    // inherits the parent's death via normal reparenting semantics.
+    #[cfg(target_os = "linux")]
     unsafe {
         use std::os::unix::process::CommandExt;
         cmd.pre_exec(|| {

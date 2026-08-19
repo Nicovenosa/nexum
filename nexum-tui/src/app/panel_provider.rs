@@ -7,7 +7,7 @@ impl App {
     /// invalid, the panel renders an explicit error message instead of any data.
     pub fn open_provider_panel(&mut self) {
         let panel = provider_panel::ProviderPanel::load();
-        self.open_panel(PanelState::Provider(panel));
+        self.open_panel(PanelState::Provider(Box::new(panel)));
     }
 
     /// Close the `/proveedor` catalog panel.

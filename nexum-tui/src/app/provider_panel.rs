@@ -719,7 +719,7 @@ pub(crate) enum Row {
     /// A detected provider entry ("Tus proveedores"). Selectable.
     Provider {
         tier: u8,
-        entry: CatalogProviderEntry,
+        entry: Box<CatalogProviderEntry>,
     },
     /// A pre-configured Catálogo provider (one-step login). Selectable.
     CatalogEntry { entry: CatalogLoginEntry },
@@ -1105,7 +1105,7 @@ impl ProviderPanel {
                     rows.extend(
                         providers
                             .into_iter()
-                            .map(|entry| Row::Provider { tier, entry }),
+                            .map(|entry| Row::Provider { tier, entry: Box::new(entry) }),
                     );
                 }
             }
@@ -1160,7 +1160,7 @@ impl ProviderPanel {
     /// The currently selected provider entry, if any.
     pub(crate) fn selected_entry(&self) -> Option<&CatalogProviderEntry> {
         self.rows.get(self.selected).and_then(|r| match r {
-            Row::Provider { entry, .. } => Some(entry),
+            Row::Provider { entry, .. } => Some(entry.as_ref()),
             _ => None,
         })
     }

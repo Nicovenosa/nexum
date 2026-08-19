@@ -47,6 +47,7 @@ pub fn acquire(socket_path: &Path) -> std::io::Result<Option<InstanceLock>> {
         .create(true)
         .read(true)
         .write(true)
+        .truncate(false)
         .open(&lock_path)?;
     let fd = file.as_raw_fd();
     // flock exclusivo, no bloqueante.

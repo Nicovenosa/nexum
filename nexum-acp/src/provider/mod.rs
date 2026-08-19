@@ -780,7 +780,6 @@ mod resolve_model_test {
 #[cfg(test)]
 mod ollama_streaming_policy_test {
     use super::LlmProvider;
-    use nexum_agent::llm::BaseModel;
 
     /// GATE: la capa provider aplica el perfil non-stream SÓLO a Ollama local.
     #[test]
@@ -935,7 +934,7 @@ mod free_access_gate_tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join(super::catalog_path::LIVE_CATALOG_FILE_NAME),
-            &format!(
+            format!(
                 r#"{{"catalog_generation":{},"providers":[
                  {{"provider_id":"opencode_zen","credential_state":"free_access"}},
                  {{"provider_id":"ollama_local","credential_state":"verified"}}]}}"#,

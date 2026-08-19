@@ -229,6 +229,7 @@ mod tests {
     use crate::hormiguero::bridge::test_env_lock;
 
     #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
     async fn test_hormiguero_status_renderiza_sin_crash() {
         let _guard = test_env_lock();
         std::env::remove_var("NEXUM_HORMIGUERO");
@@ -253,6 +254,7 @@ mod tests {
     }
 
     #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
     async fn test_hormiguero_test_con_flag_off_informa_deshabilitado() {
         let _guard = test_env_lock();
         std::env::remove_var("NEXUM_HORMIGUERO");
@@ -263,6 +265,7 @@ mod tests {
     }
 
     #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
     async fn test_hormiguero_route_sin_debug_es_dev_only() {
         let _guard = test_env_lock();
         std::env::remove_var("NEXUM_HORMIGUERO_DEBUG");

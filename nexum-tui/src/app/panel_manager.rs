@@ -152,7 +152,7 @@ pub enum PanelState {
     Memory(MemoryPanel),
     Tasks(TasksPanel),
     Betas(BetasPanel),
-    Provider(ProviderPanel),
+    Provider(Box<ProviderPanel>),
 }
 
 // ─── panel_dispatch! 宏 ────────────────────────────────────────────────────

@@ -12,12 +12,13 @@ pub mod local;
 pub mod mpsc;
 pub mod stdio;
 pub mod types;
+#[cfg(unix)]
 pub mod unix;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod hub_test;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod unix_test;
 
 #[cfg(test)]

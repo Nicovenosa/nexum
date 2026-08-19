@@ -613,6 +613,7 @@ async fn setup_scrolling_session_with_sticky_probe(
 /// Sprint prompt-sticky 2026-07-07: por DEFAULT la active prompt bar está OFF,
 /// así que el último prompt NO debe quedar pegado arriba (no se duplica).
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
 async fn test_active_prompt_bar_off_por_default_no_sticky() {
     let _g = PROVIDER_ENV_TEST_LOCK.lock().unwrap();
     let prev = std::env::var("NEXUM_ACTIVE_PROMPT_BAR").ok();
@@ -641,6 +642,7 @@ async fn test_active_prompt_bar_off_por_default_no_sticky() {
 
 /// Con NEXUM_ACTIVE_PROMPT_BAR=on la barra vuelve (opt-in explícito).
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
 async fn test_active_prompt_bar_on_muestra_sticky() {
     let _g = PROVIDER_ENV_TEST_LOCK.lock().unwrap();
     let prev = std::env::var("NEXUM_ACTIVE_PROMPT_BAR").ok();
@@ -711,6 +713,7 @@ async fn test_sticky_header_hidden_after_clear() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
 async fn test_sticky_header_shows_last_message_not_first() {
     // Testea la LÓGICA de la sticky bar (última, no primera) — requiere el
     // flag on (default off desde el sprint prompt-sticky).
@@ -763,6 +766,7 @@ async fn test_sticky_header_shows_last_message_not_first() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
 async fn test_sticky_header_truncation_long_message() {
     // Testea el truncado de la sticky bar — requiere el flag on.
     let _g = PROVIDER_ENV_TEST_LOCK.lock().unwrap();
@@ -3661,6 +3665,7 @@ async fn test_scroll_transcript_no_toca_el_input_buffer() {
 /// Con NEXUM_PREDICTIONS off (default), una PredictionReady que llega NO
 /// debe almacenarse en ui.prediction → el composer nunca muestra ghost text.
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
 async fn test_prediction_ready_descartada_con_flag_off() {
     let _g = PROVIDER_ENV_TEST_LOCK.lock().unwrap();
     let prev = std::env::var("NEXUM_PREDICTIONS").ok();
@@ -3685,6 +3690,7 @@ async fn test_prediction_ready_descartada_con_flag_off() {
 
 /// Con NEXUM_PREDICTIONS=on la prediction SÍ se almacena (opt-in explícito).
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
 async fn test_prediction_ready_almacenada_con_flag_on() {
     let _g = PROVIDER_ENV_TEST_LOCK.lock().unwrap();
     let prev = std::env::var("NEXUM_PREDICTIONS").ok();

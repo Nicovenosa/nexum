@@ -663,6 +663,7 @@ mod tests {
     }
 
     #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
     async fn test_public_demo_bloquea_escucha_real() {
         let _g = test_env_lock();
         std::env::set_var("NEXUM_PUBLIC_DEMO", "1");

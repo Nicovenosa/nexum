@@ -907,7 +907,7 @@ fn spawn_slot_host_with_lifecycle(
     std::fs::create_dir_all(slot).unwrap();
     let host = slot.join("nexum-acp-host");
     std::fs::copy(std::env::current_exe().unwrap(), &host).unwrap();
-    let child = Command::new(&host)
+    let mut child = Command::new(&host)
         .arg("--exact")
         .arg("acp_client::bootstrap_test::host_identity_slot_host_helper")
         .arg("--ignored")
@@ -929,6 +929,8 @@ fn spawn_slot_host_with_lifecycle(
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+    let _ = child.kill();
+    let _ = child.wait();
     panic!("isolated slot host did not bind {}", socket.display());
 }
 

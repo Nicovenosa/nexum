@@ -63,6 +63,7 @@
         (app, handle)
     }
 
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
     async fn render_headless_ollama_model() -> (App, crate::ui::headless::HeadlessHandle) {
         // Altura 220: el catálogo real crece con cada provider conectado
         // (post autologin 2026-07-06: + Claude 14 modelos + Codex 7). Con 80
@@ -162,6 +163,7 @@
     }
 
     #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
     async fn test_openai_model_panel_does_not_render_fabricated_models() {
         // Aislado: sin esto el test lee el catálogo de quien lo corra.
         // El candado va ANTES del guard: XDG_DATA_HOME es estado global.

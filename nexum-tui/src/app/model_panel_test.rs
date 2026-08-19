@@ -637,6 +637,7 @@ fn provider_model_update_is_atomic() {
 /// no aparece ningún system note, así que view_messages sigue vacío y la
 /// pantalla base sigue siendo el splash.
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
 async fn test_enter_en_modelo_no_saca_del_splash() {
         // Aislado: sin esto el test lee el catálogo de quien lo corra.
         // El candado va ANTES del guard: XDG_DATA_HOME es estado global.

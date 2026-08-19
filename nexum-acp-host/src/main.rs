@@ -1,14 +1,20 @@
+#[cfg(unix)]
 mod config;
+#[cfg(unix)]
 mod host;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod host_test;
+#[cfg(unix)]
 mod instance_lock;
+#[cfg(unix)]
 mod lifecycle;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod lifecycle_test;
 
+#[cfg(unix)]
 use clap::Parser;
 
+#[cfg(unix)]
 #[derive(Parser)]
 #[command(name = "nexum-acp-host", version, about = "Local ACP Unix socket host")]
 struct Cli {
@@ -20,6 +26,14 @@ struct Cli {
     diagnostic: Option<std::path::PathBuf>,
 }
 
+/// This binary hosts a Unix-domain-socket ACP server and is Unix-only.
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("nexum-acp-host: not supported on this platform (Unix domain sockets required)");
+    std::process::exit(1);
+}
+
+#[cfg(unix)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -45,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
+#[cfg(unix)]
 async fn run(socket_path: std::path::PathBuf) -> anyhow::Result<()> {
     // Guard de instancia única (Fase B): si ya hay un host autoritativo sobre
     // este socket, salir limpio (exit 0) SIN duplicar. Elimina la acumulación
@@ -61,6 +76,7 @@ async fn run(socket_path: std::path::PathBuf) -> anyhow::Result<()> {
     host::run(socket_path, config).await
 }
 
+#[cfg(unix)]
 fn sanitize_diagnostic(error: &anyhow::Error) -> String {
     let raw = format!("{error:#}");
     let lowered = raw.to_ascii_lowercase();
@@ -82,6 +98,7 @@ fn sanitize_diagnostic(error: &anyhow::Error) -> String {
     }
 }
 
+#[cfg(unix)]
 fn write_diagnostic(
     path: &std::path::Path,
     classification: &str,
@@ -107,6 +124,7 @@ fn write_diagnostic(
     file.write_all(b"\n")
 }
 
+#[cfg(unix)]
 fn install_panic_diagnostic(path: std::path::PathBuf) {
     std::panic::set_hook(Box::new(move |_| {
         let _ = write_diagnostic(&path, "HOST_CRASH", 101, "panic payload redacted");

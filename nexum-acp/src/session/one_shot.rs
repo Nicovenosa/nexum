@@ -121,7 +121,7 @@ impl OneShotExecutor {
             _ = req.cancel.cancelled() => OneShotOutcome::Cancelled,
             result = tokio::time::timeout(self.policy.no_progress_deadline(), call) => {
                 match result {
-                    Ok(Ok(reasoning)) => OneShotOutcome::Response(reasoning),
+                    Ok(Ok(reasoning)) => OneShotOutcome::Response(Box::new(reasoning)),
                     Ok(Err(error)) => OneShotOutcome::Failed(error.to_string()),
                     Err(_) => OneShotOutcome::TimedOut,
                 }
@@ -131,6 +131,7 @@ impl OneShotExecutor {
 
         match outcome {
             OneShotOutcome::Response(reasoning) if reasoning.tool_calls.is_empty() => {
+                let reasoning = *reasoning;
                 let answer = reasoning.final_answer.unwrap_or_default();
                 let response = reasoning
                     .source_message
@@ -232,7 +233,7 @@ impl OneShotExecutor {
 }
 
 enum OneShotOutcome {
-    Response(nexum_agent::agent::Reasoning),
+    Response(Box<nexum_agent::agent::Reasoning>),
     Failed(String),
     TimedOut,
     Cancelled,

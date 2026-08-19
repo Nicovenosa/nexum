@@ -190,7 +190,7 @@ fn la_duda_cae_del_lado_barato() {
 // ─── Matching por palabra: el falso positivo que la Fase 1 venía a eliminar ──
 
 #[test]
-fn palabras_que_CONTIENEN_un_verbo_no_escalan() {
+fn palabras_que_contienen_un_verbo_no_escalan() {
     // Antes se buscaba por substring: "implementación" matcheaba "implementa",
     // "buscador" matcheaba "busca", "testigo" matcheaba "test".
     for msg in [

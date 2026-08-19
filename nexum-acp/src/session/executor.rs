@@ -1469,7 +1469,7 @@ fn is_local_micro_e2e_envelope(envelope: &crate::task::TaskEnvelopeV1) -> bool {
         && envelope.success_criteria.is_empty()
         && envelope.output_format == crate::task::OutputFormat::Text
         && envelope.execution_budget == crate::task::ExecutionBudgetV1::default()
-        && envelope.evidence_policy.require_evidence == false
+        && !envelope.evidence_policy.require_evidence
         && envelope.evidence_policy.minimum_evidence_refs == 0
         && envelope.evidence_policy.allow_unverified_output
         && envelope.priority == crate::task::TaskPriority::Normal

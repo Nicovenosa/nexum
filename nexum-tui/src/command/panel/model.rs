@@ -172,7 +172,7 @@ mod tests {
             provider_id: "catalog-provider".to_string(),
             family: "Catalog".to_string(),
         };
-        let selected = resolve_unique_model_choice(&[unique.clone()], "catalog-model").unwrap();
+        let selected = resolve_unique_model_choice(std::slice::from_ref(&unique), "catalog-model").unwrap();
         let mut cfg = make_openai_config("previous-model");
         apply_model_choice(&mut cfg, &selected);
         assert_eq!(cfg.config.active_alias, "catalog-model");

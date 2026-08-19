@@ -165,6 +165,7 @@ mod tests {
     use crate::hormiguero::bridge::test_env_lock;
 
     #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
     async fn test_voz_status_renderiza_sin_crash_y_sin_secretos() {
         let _g = test_env_lock();
         std::env::remove_var("NEXUM_VOICE");
@@ -188,6 +189,7 @@ mod tests {
     }
 
     #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
     async fn test_voz_test_no_crashea_con_sidecar_muerto() {
         let _g = test_env_lock();
         let dir = tempfile::tempdir().unwrap();
@@ -203,6 +205,7 @@ mod tests {
     }
 
     #[tokio::test]
+#[allow(clippy::await_holding_lock)] // test serializes env mutation via a std Mutex; keeping the guard held across await is intentional
     async fn test_voz_privacy_muestra_politica() {
         let _g = test_env_lock();
         let (mut app, _) = crate::app::App::new_headless(80, 24).await;
