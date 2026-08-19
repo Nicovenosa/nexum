@@ -29,6 +29,9 @@ fn installed_layout_accepts_direct_version_executable() {
     let tmp = tempfile::tempdir().unwrap();
     let version = tmp.path().join("lib/nexum/v1");
     make_layout(&version);
+    // macOS /var/folders canonicalizes to /private/var/folders; normalize the
+    // expected side so the comparison is platform-neutral.
+    let version = std::fs::canonicalize(&version).unwrap_or(version);
 
     let layout = InstalledLayoutV1::from_executable(&version.join("nexum")).unwrap();
 
@@ -45,6 +48,9 @@ fn installed_layout_canonicalizes_current_and_prefix_launcher_symlinks() {
     let tmp = tempfile::tempdir().unwrap();
     let version = tmp.path().join("lib/nexum/v1");
     make_layout(&version);
+    // macOS /var/folders canonicalizes to /private/var/folders; normalize the
+    // expected side so the comparison is platform-neutral.
+    let version = std::fs::canonicalize(&version).unwrap_or(version);
     let current = tmp.path().join("lib/nexum/current");
     let launcher_dir = tmp.path().join("bin");
     std::fs::create_dir_all(&launcher_dir).unwrap();

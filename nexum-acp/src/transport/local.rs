@@ -457,7 +457,7 @@ impl AcpTransport for LocalAcpTransport {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod runtime_directory_tests {
     use std::{ffi::OsStr, fs, os::unix::fs::PermissionsExt, path::Path};
 

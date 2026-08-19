@@ -280,8 +280,15 @@ impl LockSync {
                         .and_then(|s| s.trim().parse().ok())
                         .unwrap_or(0);
                     // Un lock de un proceso muerto no puede bloquear para
-                    // siempre: se limpia y se reintenta una vez.
-                    let vivo = pid > 0 && Path::new(&format!("/proc/{pid}")).exists();
+                    // siempre: se limpia y se reintenta una vez. La liveness se
+                    // consulta con sysinfo (portátil: /proc no existe fuera de
+                    // Linux).
+                    let vivo = pid > 0 && {
+                        use sysinfo::{Pid, ProcessesToUpdate, System};
+                        let mut system = System::new();
+                        system.refresh_processes(ProcessesToUpdate::Some(&[Pid::from_u32(pid as u32)]), true);
+                        system.process(Pid::from_u32(pid as u32)).is_some()
+                    };
                     if vivo {
                         return Err(WriteError::Concurrente(pid));
                     }

@@ -199,7 +199,24 @@ impl HostIdentityGuard {
         socket_path: &Path,
         stream: &LocalSocketStream,
     ) -> Result<(), HostIdentityError> {
-        self.verify_with_source(socket_path, stream, &LinuxHostIdentitySource)
+        // Peer-executable verification resolves /proc/<pid>/exe, which only
+        // exists on Linux. macOS/Windows cannot resolve a peer's executable
+        // (no peer PID on Darwin), so the guard degrades to socket-path trust
+        // there: the connect target is the runtime socket the TUI itself
+        // manages. Keep the rejection semantics exercisable via
+        // verify_with_source for unit tests on every platform.
+        #[cfg(target_os = "linux")]
+        {
+            self.verify_with_source(socket_path, stream, &LinuxHostIdentitySource)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            tracing::debug!(
+                socket_path = %socket_path.display(),
+                "ACP host identity guard: peer executable verification unavailable"
+            );
+            Ok(())
+        }
     }
 
     pub(crate) fn verify_with_source(

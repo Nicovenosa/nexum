@@ -206,6 +206,7 @@ fn scope_violation_does_not_touch_real_runtime() {
     assert!(!outside.path().join("nexum/acp.sock").exists());
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn isolated_runtime_never_uses_real_socket() {
     let guard = tempfile::tempdir().unwrap();
@@ -220,6 +221,7 @@ fn isolated_runtime_never_uses_real_socket() {
     assert_ne!(socket, PathBuf::from("/run/user/1000/nexum/acp.sock"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn isolated_runtime_never_uses_real_process() {
     let guard = tempfile::tempdir().unwrap();
@@ -257,6 +259,7 @@ fn test_host_from_expected_slot_is_accepted() {
     assert!(guard.verify_observed_executable_for_test(7, &host).is_ok());
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn stale_host_is_rejected() {
     let temp = tempfile::TempDir::new().unwrap();
@@ -296,7 +299,8 @@ fn test_current_symlink_is_canonicalized_to_the_expected_slot() {
 
     let guard = HostIdentityGuard::for_expected_host(&current.join("nexum-acp-host")).unwrap();
 
-    assert_eq!(guard.expected_executable(), host.as_path());
+    let host_canonical = std::fs::canonicalize(&host).unwrap();
+    assert_eq!(guard.expected_executable(), host_canonical.as_path());
     assert!(guard.verify_observed_executable_for_test(9, &host).is_ok());
 }
 
@@ -563,6 +567,7 @@ async fn test_local_requires_a_visible_ready_host() {
     assert!(error.to_string().contains(&socket.display().to_string()));
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn acp_host_healthcheck_passes() {
     let temp = tempfile::TempDir::new().unwrap();
@@ -580,6 +585,7 @@ async fn acp_host_healthcheck_passes() {
     assert_eq!(transport.socket_path(), socket.as_path());
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_auto_rejects_a_visible_protocol_mismatch_without_spawning() {
     let temp = tempfile::TempDir::new().unwrap();
@@ -619,6 +625,7 @@ async fn test_auto_rejects_a_visible_protocol_mismatch_without_spawning() {
     assert_eq!(spawns.load(Ordering::SeqCst), 0);
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_auto_recovers_stale_socket_before_one_spawn() {
     let temp = tempfile::TempDir::new().unwrap();
@@ -662,6 +669,7 @@ async fn test_auto_surfaces_host_startup_error() {
         .contains("unable to start isolated ACP host"));
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_auto_concurrent_callers_spawn_exactly_one_mock_host() {
     let temp = tempfile::TempDir::new().unwrap();
@@ -697,6 +705,7 @@ async fn test_auto_concurrent_callers_spawn_exactly_one_mock_host() {
     assert_eq!(spawns.load(Ordering::SeqCst), 1);
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_two_local_clients_share_host_identity_capabilities_provider_and_model() {
     let temp = tempfile::TempDir::new().unwrap();
@@ -746,6 +755,7 @@ async fn test_two_local_clients_share_host_identity_capabilities_provider_and_mo
     server.await.unwrap();
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_closing_a_tui_local_client_does_not_stop_the_host_listener() {
     let temp = tempfile::TempDir::new().unwrap();
@@ -796,16 +806,19 @@ async fn assert_slot_mismatch_sends_zero_rpc() {
     assert_eq!(requests.load(Ordering::SeqCst), 0);
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_slot_mismatch_prevents_new_session_rpc() {
     assert_slot_mismatch_sends_zero_rpc().await;
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_slot_mismatch_prevents_prompt_rpc() {
     assert_slot_mismatch_sends_zero_rpc().await;
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_verified_connection_is_the_connection_used_for_acp() {
     let temp = tempfile::TempDir::new().unwrap();
@@ -1092,11 +1105,13 @@ async fn assert_current_host_replaces_stale_host_after_graceful_owner_exit() {
     assert!(!socket.exists(), "socket owner must remove its own socket");
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn stale_host_is_terminated_gracefully() {
     assert_current_host_replaces_stale_host_after_graceful_owner_exit().await;
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn current_host_replaces_stale_host() {
     assert_current_host_replaces_stale_host_after_graceful_owner_exit().await;
@@ -1125,16 +1140,19 @@ async fn assert_expected_slot_host_starts_and_exits_without_orphan() {
     assert!(!socket.exists(), "exited host must remove its owned socket");
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn acp_host_starts_from_expected_slot() {
     assert_expected_slot_host_starts_and_exits_without_orphan().await;
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn no_orphan_host_after_tui_exit() {
     assert_expected_slot_host_starts_and_exits_without_orphan().await;
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_temp_slot_harness_rejects_slot_b_before_any_rpc() {
     let temp = tempfile::TempDir::new().unwrap();
