@@ -587,7 +587,7 @@ async fn direct_ollama_stream(
 }
 
 async fn connect(socket: &std::path::Path) -> LocalAcpTransport {
-    for _ in 0..50 {
+    for _ in 0..200 {
         if let Ok(transport) =
             LocalAcpTransport::connect_ready(socket, Duration::from_millis(100)).await
         {

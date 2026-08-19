@@ -55,7 +55,7 @@ pub(crate) async fn handle_request(
 ) -> Result<Value, AcpError> {
     match method {
         "health" | "nexum/health" => Ok(serde_json::json!({
-            "protocol_version": crate::transport::unix::LOCAL_PROTOCOL_VERSION,
+            "protocol_version": crate::transport::LOCAL_PROTOCOL_VERSION,
             "runtime_available": true,
             "health": cfg.runtime.health.get(),
             "cron_interactions": cfg.pending_interaction_broker.as_ref().map(|broker| {

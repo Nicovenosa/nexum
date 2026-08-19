@@ -15,13 +15,15 @@ pub mod types;
 #[cfg(unix)]
 pub mod unix;
 
+pub use types::LOCAL_PROTOCOL_VERSION;
+
 #[cfg(all(test, unix))]
 mod hub_test;
 
 #[cfg(all(test, unix))]
 mod unix_test;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod local_test;
 
 use async_trait::async_trait;

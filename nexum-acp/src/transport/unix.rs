@@ -31,9 +31,8 @@ use super::{
     types::{AcpError, IncomingMessage, RequestId},
     AcpTransport,
 };
+pub use super::types::LOCAL_PROTOCOL_VERSION;
 
-/// Versión del framing local. Debe cambiar si cambia el encabezado binario.
-pub const LOCAL_PROTOCOL_VERSION: u16 = 1;
 /// Máximo por mensaje para impedir que un cliente local agote memoria.
 pub const MAX_FRAME_BYTES: usize = 256 * 1024;
 const MAGIC: [u8; 4] = *b"NXAC";

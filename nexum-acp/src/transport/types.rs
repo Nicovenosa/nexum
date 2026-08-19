@@ -1,5 +1,9 @@
 //! Core transport types for ACP JSON-RPC 2.0 communication.
 
+/// Versión del framing local. Debe cambiar si cambia el encabezado binario.
+/// Portable: lo consume el servidor ACP en todas las plataformas.
+pub const LOCAL_PROTOCOL_VERSION: u16 = 1;
+
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
