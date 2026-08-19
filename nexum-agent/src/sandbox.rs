@@ -35,7 +35,13 @@ pub fn running_under_test() -> bool {
     std::env::current_exe()
         .ok()
         .map(|p| {
-            let s = p.to_string_lossy();
+            // Normalizar separadores: en Windows el path usa '\' y los
+            // marcadores de binario de test no coincidirían con '/'.
+            let s = p
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
             s.contains("/deps/")
                 || s.contains("/target/debug/")
                 || s.contains("/target/release/deps/")

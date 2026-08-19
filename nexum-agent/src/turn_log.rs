@@ -47,7 +47,9 @@ pub fn metrics_dir() -> Option<PathBuf> {
     if crate::sandbox::running_under_test() {
         return Some(crate::sandbox::temp_dir_for("metrics"));
     }
-    let home = std::env::var("HOME").ok()?;
+    let home = std::env::var("HOME")
+        .ok()
+        .or_else(|| std::env::var("USERPROFILE").ok())?;
     Some(PathBuf::from(home).join(".nexum/metrics"))
 }
 
