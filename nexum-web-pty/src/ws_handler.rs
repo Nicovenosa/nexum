@@ -6,7 +6,8 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
     },
-    response::IntoResponse,
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
 };
 use serde::Deserialize;
 use tokio::sync::mpsc;
@@ -31,6 +32,7 @@ pub struct WsQuery {
     pub args: Option<String>,
     pub cols: Option<String>,
     pub rows: Option<String>,
+    pub token: Option<String>,
 }
 
 /// 从 WsQuery 解析出的 spawn 参数。
@@ -73,12 +75,38 @@ impl WsQuery {
 }
 
 /// GET /ws 的 axum handler：升级 WebSocket。
+///
+/// Antes del upgrade se validan Origin y token:
+/// - Origin ausente o distinto del propio server (`http://localhost:PORT` /
+///   `http://127.0.0.1:PORT`, con el puerto **real** post-bind) ⇒ 403. WS no
+///   pasa por same-origin policy, así que este check es lo único que impide
+///   que una página ajena abierta en el browser se secuestre la shell.
+/// - Con host no-loopback (token activo): el cliente debe presentar el token
+///   por query param `token` o header `x-pty-token` ⇒ de lo contrario 403.
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
     Query(q): Query<WsQuery>,
-    State(state): State<SessionState>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, q, state))
+    State(session): State<SessionState>,
+) -> Response {
+    let auth = &session.ws_auth;
+    if !auth.origin_allowed(&headers) {
+        warn!(
+            "WS 拒绝: Origin no permitido (port={})",
+            auth.port
+        );
+        return reject("forbidden: origin not allowed");
+    }
+    if !auth.token_allowed(q.token.as_deref(), &headers) {
+        warn!("WS 拒绝: token requerido o inválido");
+        return reject("forbidden: invalid or missing token");
+    }
+    ws.on_upgrade(move |socket| handle_socket(socket, q, session)).into_response()
+}
+
+/// Respuesta 403 corta para rechazos pre-upgrade.
+fn reject(reason: &'static str) -> Response {
+    (StatusCode::FORBIDDEN, reason).into_response()
 }
 
 /// WebSocket 连接生命周期：spawn PTY + 双向 pump。
