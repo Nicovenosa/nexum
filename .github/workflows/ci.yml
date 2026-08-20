@@ -50,3 +50,50 @@ jobs:
 
             - name: Clippy
               run: cargo clippy --workspace --all-targets -- -D clippy::correctness -D clippy::suspicious -D clippy::perf
+
+    security-audit:
+        name: Security audit (high severity)
+        runs-on: ubuntu-latest
+        # Fails only on HIGH (CVSS >= 7.0) vulnerabilities with a fix available,
+        # so an advisory without a clean fix cannot stall the pipeline.
+        # Ignored RustSec IDs (no clean fix in this workspace):
+        #   RUSTSEC-2026-0194/0195 (quick-xml via plist->syntect, highlighter of
+        #     nexum-widgets; fix needs a syntect major bump)
+        #   RUSTSEC-2026-0185 (quinn-proto: optional HTTP/3 stack of reqwest,
+        #     not part of the built dependency tree)
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@master
+              with:
+                  toolchain: stable
+
+            - name: Cache cargo registry and build
+              uses: Swatinem/rust-cache@v2
+              with:
+                  key: audit
+
+            - name: Install cargo-audit
+              run: cargo install cargo-audit --locked
+
+            - name: Audit high-severity vulnerabilities
+              run: |
+                  vulnerable=$(
+                    cargo audit --json | jq -r '
+                      [.vulnerabilities.list[]
+                       | select(.cvss.score >= 7.0)
+                       | select(.advisory.id as $id
+                               | ["RUSTSEC-2026-0194", "RUSTSEC-2026-0195", "RUSTSEC-2026-0185"]
+                                 | index($id) | not)
+                       | .advisory.id + " " + .package.name + " cvss=" + (.cvss.score | tostring)]
+                      | .[]
+                    '
+                  )
+                  if [ -n "$vulnerable" ]; then
+                      echo "High-severity vulnerabilities with an available fix:"
+                      echo "$vulnerable"
+                      exit 1
+                  fi
+                  echo "No high-severity vulnerabilities (excluding ignored, see ci.yml comment)."
