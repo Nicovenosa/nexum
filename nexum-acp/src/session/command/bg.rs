@@ -76,7 +76,7 @@ impl AgentCommand for BgCommand {
                             &ctx.session_id,
                             &ExecutorEvent::TextChunk {
                                 message_id: MessageId::new(),
-                                chunk: "✗ 后台任务启动失败: 无法构造 LLM 实例（请检查 ~/.peri/settings.json 的 Provider 配置）\n".into(),
+                                chunk: "✗ 后台任务启动失败: 无法构造 LLM 实例（请检查 ~/.nexum/settings.json 的 Provider 配置）\n".into(),
                                 source_agent_id: None,
                             },
                             0,

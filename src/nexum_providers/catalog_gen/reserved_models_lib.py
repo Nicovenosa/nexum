@@ -5,7 +5,7 @@ Both the Provider Resolver and the Provider Catalog import this so they agree
 on which models are internal_only (reserved for the Hormiguero) and therefore
 must NOT be certified as the user-facing runtime model.
 
-The Rust /modelo filter (``peri-tui/src/app/model_panel.rs``) mirrors the same
+The Rust /modelo filter (``nexum-tui/src/app/model_panel.rs``) mirrors the same
 baseline list via ``DEFAULT_RESERVED_INTERNAL_MODELS``; keep them in sync when
 editing this file or that constant.
 
@@ -24,7 +24,7 @@ _DEFAULT_PATH = Path(__file__).resolve().parent / "reserved-models.json"
 # Hardcoded baseline mirror of the JSON's reserved_models[].model set. Used as a
 # defense-in-depth fallback if the JSON is missing/corrupt, AND so callers can
 # validate the JSON matches the expected baseline. Must match the Rust const
-# DEFAULT_RESERVED_INTERNAL_MODELS in peri-tui/src/app/model_panel.rs.
+# DEFAULT_RESERVED_INTERNAL_MODELS in nexum-tui/src/app/model_panel.rs.
 BASELINE_RESERVED_MODELS: tuple[str, ...] = ("qwen3:0.6b",)
 
 

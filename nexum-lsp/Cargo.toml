@@ -1,6 +1,7 @@
 [package]
 name = "nexum-lsp"
 version.workspace = true
+license = "Apache-2.0"
 edition.workspace = true
 description = "LSP client library for peri agent framework"
 

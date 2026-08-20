@@ -1,6 +1,6 @@
 """Nexum Provider Login — one-step login CLI for Catálogo providers (ADR-044 cierre).
 
-Invoked by the peri-tui `/provedor` panel when the user pastes an API key on a
+Invoked by the nexum-tui `/provedor` panel when the user pastes an API key on a
 Catálogo row. Protocol (all JSON, single line):
 
     stdin:  {"provider_id": "...", "api_key": "...", "base_url": "..."?}

@@ -272,7 +272,7 @@ cargo test -p nexum-middlewares
 cargo test -p nexum-tui --lib -- <test_name>
 ```
 
-The CI pipeline (`ci.yml`) runs lint (Ruff + mypy) and the full test suite on Linux, macOS and Windows.
+The CI pipeline (`ci.yml`) runs `cargo build`, `cargo test` and Clippy on Linux, macOS and Windows.
 
 ---
 

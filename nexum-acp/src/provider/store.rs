@@ -4,12 +4,12 @@ use anyhow::Result;
 
 use super::config::NexumConfig;
 
-/// 配置文件路径：~/.peri/settings.json
+/// 配置文件路径：~/.nexum/settings.json
 pub fn config_path() -> PathBuf {
     nexum_agent::config_home::nexum_home().join("settings.json")
 }
 
-/// 工作区配置文件路径：{cwd}/.peri/settings.json
+/// 工作区配置文件路径：{cwd}/.nexum/settings.json
 /// 文件不存在时返回 None
 pub fn workspace_config_path() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
@@ -23,8 +23,8 @@ pub fn workspace_config_path() -> Option<PathBuf> {
 
 /// 加载配置（全局 + 工作区合并），文件不存在时返回默认空配置
 ///
-/// 先加载 ~/.peri/settings.json 获取全局配置，
-/// 再检测当��工作目录的 .peri/settings.json 是否存在，
+/// 先加载 ~/.nexum/settings.json 获取全局配置，
+/// 再检测当��工作目录的 .nexum/settings.json 是否存在，
 /// 若存在则加载并以工作区字段覆盖全局对应字段。
 pub fn load() -> Result<NexumConfig> {
     let mut merged = load_from(&config_path())?;

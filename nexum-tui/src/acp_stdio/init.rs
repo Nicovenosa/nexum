@@ -33,7 +33,7 @@ pub(super) async fn init_stdio_context(cwd: String) -> anyhow::Result<Arc<StdioC
     let nexum_config = nexum_tui::config::load().unwrap_or_default();
     let provider = LlmProvider::from_config(&nexum_config)
         .or_else(LlmProvider::from_env)
-        .ok_or_else(|| anyhow::anyhow!("No LLM provider configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or configure ~/.peri/settings.json"))?;
+        .ok_or_else(|| anyhow::anyhow!("No LLM provider configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or configure ~/.nexum/settings.json"))?;
 
     tracing::info!(
         provider = %provider.display_name(),

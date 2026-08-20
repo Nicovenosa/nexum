@@ -1,4 +1,4 @@
-//! 配置类型定义 — 与 ~/.peri/settings.json 对应
+//! 配置类型定义 — 与 ~/.nexum/settings.json 对应
 //!
 //! 从 nexum-tui 迁移，移除 TUI 特有关联。
 
@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// 顶层包装（与 ~/.peri/settings.json 的 { "config": {...} } 对应）
+/// 顶层包装（与 ~/.nexum/settings.json 的 { "config": {...} } 对应）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NexumConfig {
     #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
