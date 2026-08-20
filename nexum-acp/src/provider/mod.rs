@@ -913,14 +913,12 @@ mod free_access_gate_tests {
     fn sin_catalogo_ningun_provider_tiene_free_access() {
         let tmp = std::env::temp_dir().join(format!("nexum-facc-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
-        let previo = std::env::var("XDG_DATA_HOME").ok();
-        std::env::set_var("XDG_DATA_HOME", &tmp);
-        let zen = catalog_declares_free_access("opencode_zen");
-        let ollama = catalog_declares_free_access("ollama_local");
-        match previo {
-            Some(v) => std::env::set_var("XDG_DATA_HOME", v),
-            None => std::env::remove_var("XDG_DATA_HOME"),
-        }
+        let (zen, ollama) = super::catalog_path::with_xdg(&tmp, || {
+            (
+                catalog_declares_free_access("opencode_zen"),
+                catalog_declares_free_access("ollama_local"),
+            )
+        });
         let _ = std::fs::remove_dir_all(&tmp);
         assert!(!zen, "sin catálogo no hay excepción");
         assert!(!ollama);
@@ -942,14 +940,12 @@ mod free_access_gate_tests {
             ),
         )
         .unwrap();
-        let previo = std::env::var("XDG_DATA_HOME").ok();
-        std::env::set_var("XDG_DATA_HOME", &tmp);
-        let zen = catalog_declares_free_access("opencode_zen");
-        let ollama = catalog_declares_free_access("ollama_local");
-        match previo {
-            Some(v) => std::env::set_var("XDG_DATA_HOME", v),
-            None => std::env::remove_var("XDG_DATA_HOME"),
-        }
+        let (zen, ollama) = super::catalog_path::with_xdg(&tmp, || {
+            (
+                catalog_declares_free_access("opencode_zen"),
+                catalog_declares_free_access("ollama_local"),
+            )
+        });
         let _ = std::fs::remove_dir_all(&tmp);
         assert!(zen, "el declarado sí");
         assert!(!ollama, "un provider verificado NO obtiene la excepción");
@@ -1054,23 +1050,20 @@ mod generation_stamp_tests {
             r#"{"providers":[{"provider_id":"opencode_zen","credential_state":"free_access"}]}"#,
         )
         .unwrap();
-        let previo = std::env::var("XDG_DATA_HOME").ok();
-        std::env::set_var("XDG_DATA_HOME", &tmp);
-        let sin_estampa = catalog_declares_free_access("opencode_zen");
-        // Ahora el mismo catálogo CON la estampa correcta.
-        std::fs::write(
-            dir.join(super::catalog_path::LIVE_CATALOG_FILE_NAME),
-            format!(
-                r#"{{"catalog_generation":{},"providers":[{{"provider_id":"opencode_zen","credential_state":"free_access"}}]}}"#,
-                CATALOG_GENERATION
-            ),
-        )
-        .unwrap();
-        let con_estampa = catalog_declares_free_access("opencode_zen");
-        match previo {
-            Some(v) => std::env::set_var("XDG_DATA_HOME", v),
-            None => std::env::remove_var("XDG_DATA_HOME"),
-        }
+        let (sin_estampa, con_estampa) = super::catalog_path::with_xdg(&tmp, || {
+            let sin_estampa = catalog_declares_free_access("opencode_zen");
+            // Ahora el mismo catálogo CON la estampa correcta.
+            std::fs::write(
+                dir.join(super::catalog_path::LIVE_CATALOG_FILE_NAME),
+                format!(
+                    r#"{{"catalog_generation":{},"providers":[{{"provider_id":"opencode_zen","credential_state":"free_access"}}]}}"#,
+                    CATALOG_GENERATION
+                ),
+            )
+            .unwrap();
+            let con_estampa = catalog_declares_free_access("opencode_zen");
+            (sin_estampa, con_estampa)
+        });
         let _ = std::fs::remove_dir_all(&tmp);
         assert!(!sin_estampa, "sin estampa NO se concede");
         assert!(con_estampa, "con estampa válida sí");
@@ -1159,17 +1152,7 @@ mod tool_support_tests {
             serde_json::to_string(&doc).expect("serializar"),
         )
         .expect("escribir catálogo");
-        let previo = std::env::var("XDG_DATA_HOME").ok();
-        // SAFETY: los tests de este módulo corren serializados por `--test-threads`
-        // sobre el mismo env; el directorio es único por proceso+thread.
-        unsafe { std::env::set_var("XDG_DATA_HOME", &dir) };
-        let out = f();
-        unsafe {
-            match previo {
-                Some(v) => std::env::set_var("XDG_DATA_HOME", v),
-                None => std::env::remove_var("XDG_DATA_HOME"),
-            }
-        }
+        let out = super::catalog_path::with_xdg(&dir, f);
         let _ = std::fs::remove_dir_all(&dir);
         out
     }

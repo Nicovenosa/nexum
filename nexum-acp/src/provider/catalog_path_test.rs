@@ -1,19 +1,7 @@
 use super::*;
 
-/// `XDG_DATA_HOME` es estado global del proceso; los tests que lo tocan se
-/// serializan entre sí.
-static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 fn con_xdg<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
-    let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
-    let previo = std::env::var("XDG_DATA_HOME").ok();
-    std::env::set_var("XDG_DATA_HOME", dir);
-    let out = f();
-    match previo {
-        Some(v) => std::env::set_var("XDG_DATA_HOME", v),
-        None => std::env::remove_var("XDG_DATA_HOME"),
-    }
-    out
+    super::with_xdg(dir, f)
 }
 
 fn escribir(path: &Path, contenido: &str) {

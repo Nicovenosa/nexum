@@ -175,6 +175,26 @@ pub fn resolve() -> CatalogResolution {
     }
 }
 
+/// `XDG_DATA_HOME` es estado global del proceso: todos los tests del crate que
+/// lo tocan (catalog_path_test, free_access, generación, tool_support) deben
+/// serializarse sobre el MISMO lock. Antes cada módulo usaba el suyo y en
+/// Windows dos tests podían pisarse la variable entre sí.
+#[cfg(test)]
+pub(crate) static XDG_DATA_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn with_xdg<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+    let _g = XDG_DATA_HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let previo = std::env::var("XDG_DATA_HOME").ok();
+    std::env::set_var("XDG_DATA_HOME", dir);
+    let out = f();
+    match previo {
+        Some(v) => std::env::set_var("XDG_DATA_HOME", v),
+        None => std::env::remove_var("XDG_DATA_HOME"),
+    }
+    out
+}
+
 #[cfg(test)]
 #[path = "catalog_path_test.rs"]
 mod tests;
