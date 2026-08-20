@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Peri Terminal</title>
+        <title>Nexum Terminal</title>
         <link
             rel="stylesheet"
             href="https://unpkg.com/xterm@5.3.0/css/xterm.css"
@@ -413,6 +413,13 @@ https://unpkg.com/jetbrains-mono@1.0.6/css/jetbrains-mono.css
                 // WebSocket 连接
                 const protocol =
                     location.protocol === "https:" ? "wss:" : "ws:";
+                // Si la página se abrió con ?token=..., el token se propaga
+                // al socket (server en host no-loopback requiere uno).
+                const page = new URLSearchParams(location.search);
+                const tokenParam = page.get("token");
+                const tokenSuffix = tokenParam
+                    ? "&token=" + encodeURIComponent(tokenParam)
+                    : "";
                 const wsUrl =
                     protocol +
                     "//" +
@@ -420,7 +427,8 @@ https://unpkg.com/jetbrains-mono@1.0.6/css/jetbrains-mono.css
                     "/ws?cols=" +
                     term.cols +
                     "&rows=" +
-                    term.rows;
+                    term.rows +
+                    tokenSuffix;
                 const ws = new WebSocket(wsUrl);
 
                 term.onData((data) => {

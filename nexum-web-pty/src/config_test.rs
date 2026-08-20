@@ -54,14 +54,62 @@ fn test_config_from_args_uses_cmd_when_set() {
 #[serial]
 fn test_config_from_args_defaults_when_all_unset() {
     unsafe {
+        std::env::remove_var("HOST");
         std::env::remove_var("PORT");
         std::env::remove_var("SHELL");
         std::env::remove_var("CWD");
         std::env::remove_var("CMD");
     }
     let cfg = Config::parse_from(["nexum-web-pty"]);
+    assert_eq!(cfg.host, "127.0.0.1");
     assert_eq!(cfg.port, 0);
     assert!(cfg.shell.is_none());
     assert!(cfg.cwd.is_none());
     assert!(cfg.initial_cmd.is_none());
+}
+
+#[test]
+#[serial]
+fn test_config_bind_host_defaults_to_loopback() {
+    unsafe {
+        std::env::remove_var("HOST");
+    }
+    let cfg = Config::parse_from(["nexum-web-pty"]);
+    assert_eq!(cfg.host, "127.0.0.1");
+}
+
+#[test]
+#[serial]
+fn test_config_uses_host_env_when_set() {
+    unsafe {
+        std::env::set_var("HOST", "0.0.0.0");
+    }
+    let cfg = Config::parse_from(["nexum-web-pty"]);
+    assert_eq!(cfg.host, "0.0.0.0");
+    unsafe {
+        std::env::remove_var("HOST");
+    }
+}
+
+#[test]
+#[serial]
+fn test_config_from_env_defaults_to_loopback() {
+    unsafe {
+        std::env::remove_var("HOST");
+    }
+    let cfg = Config::from_env();
+    assert_eq!(cfg.host, "127.0.0.1");
+}
+
+#[test]
+#[serial]
+fn test_config_from_env_uses_host_when_set() {
+    unsafe {
+        std::env::set_var("HOST", "::");
+    }
+    let cfg = Config::from_env();
+    assert_eq!(cfg.host, "::");
+    unsafe {
+        std::env::remove_var("HOST");
+    }
 }
